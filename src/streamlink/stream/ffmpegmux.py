@@ -146,6 +146,7 @@ class FFMPEGMuxer(StreamIO):
 
         self._cmd = [self.command(session), '-nostats', '-y']
         for np in self.pipes:
+            self._cmd.extend(["-decryption_key", "0d6712bf2a84edcc93d001a9613f6fec"])
             self._cmd.extend(["-i", str(np.path)])
 
         self._cmd.extend(['-c:v', videocodec])
