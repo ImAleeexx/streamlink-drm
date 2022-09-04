@@ -1271,6 +1271,7 @@ _ARGUMENT_TO_SESSIONOPTION: List[Tuple[str, str, Optional[Callable[[Any], Any]]]
     ("hls_segment_ignore_names", "hls-segment-ignore-names", None),
     ("hls_segment_key_uri", "hls-segment-key-uri", None),
     ("hls_audio_select", "hls-audio-select", None),
+    ("decryption_key", "decryption_key", None),
     ("ffmpeg_ffmpeg", "ffmpeg-ffmpeg", None),
     ("ffmpeg_verbose", "ffmpeg-verbose", None),
     ("ffmpeg_verbose_path", "ffmpeg-verbose-path", None),
