@@ -69,6 +69,7 @@ class Streamlink:
             "stream-segment-timeout": 10.0,
             "stream-timeout": 60.0,
             "ffmpeg-ffmpeg": None,
+            "decryption_key": None,
             "ffmpeg-fout": None,
             "ffmpeg-video-transcode": None,
             "ffmpeg-audio-transcode": None,
@@ -155,6 +156,8 @@ class Streamlink:
         ffmpeg-ffmpeg            (str) Specify the location of the
                                  ffmpeg executable use by Muxing streams
                                  e.g. ``/usr/local/bin/ffmpeg``
+                                 
+        decryption_key           (str) Specify the decryption stream key
 
         ffmpeg-verbose           (bool) Log stderr from ffmpeg to the
                                  console
