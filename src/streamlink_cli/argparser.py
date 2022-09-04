@@ -1033,13 +1033,22 @@ def build_parser():
     transport.add_argument("--http-stream-timeout", help=argparse.SUPPRESS)
 
     transport_ffmpeg.add_argument(
+        "-decryption_key",
+        metavar="FILENAME",
+        help="""
+        Use a CENC decryption key to decrypt the media that ffmpeg receives as
+        an input from the DASH streaming that you play with streamlink.
+
+        Example: -decryption_key "<hex key>"
+        """
+    )
+    transport_ffmpeg.add_argument(
         "--ffmpeg-ffmpeg",
         metavar="FILENAME",
         help="""
         FFMPEG is used to access or mux separate video and audio streams. You
         can specify the location of the ffmpeg executable if it is not in your
         `PATH`.
-
         Example: --ffmpeg-ffmpeg "/usr/local/bin/ffmpeg"
         """
     )
