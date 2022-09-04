@@ -202,14 +202,6 @@ class TestDASHStream(unittest.TestCase):
         self.assertEqual(streams["1080p"].audio_representation.lang, "es")
 
     @patch('streamlink.stream.dash.MPD')
-    def test_parse_manifest_drm(self, mpdClass):
-        mpdClass.return_value = Mock(periods=[Mock(adaptationSets=[Mock(contentProtection="DRM")])])
-
-        self.assertRaises(PluginError,
-                          DASHStream.parse_manifest,
-                          self.session, self.test_url)
-        mpdClass.assert_called_with(ANY, base_url="http://test.bar", url="http://test.bar/foo.mpd")
-
     def test_parse_manifest_string(self):
         with text("dash/test_9.mpd") as mpd_txt:
             test_manifest = mpd_txt.read()
