@@ -201,14 +201,6 @@ class TestDASHStream(unittest.TestCase):
         self.assertEqual(streams["720p"].audio_representation.lang, "es")
         self.assertEqual(streams["1080p"].audio_representation.lang, "es")
 
-    @patch('streamlink.stream.dash.MPD')
-    def test_parse_manifest_string(self):
-        with text("dash/test_9.mpd") as mpd_txt:
-            test_manifest = mpd_txt.read()
-
-        streams = DASHStream.parse_manifest(self.session, test_manifest)
-        self.assertSequenceEqual(list(streams.keys()), ['2500k'])
-
     @patch('streamlink.stream.dash.DASHStreamReader')
     @patch('streamlink.stream.dash.FFMPEGMuxer')
     def test_stream_open_video_only(self, muxer, reader):
