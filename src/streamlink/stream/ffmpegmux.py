@@ -148,7 +148,7 @@ class FFMPEGMuxer(StreamIO):
 
         self._cmd = [self.command(session), '-nostats', '-y']
         for np in self.pipes:
-            self._cmd.extend(['-rtbufsize', '15M'])
+            self._cmd.extend(['-rtbufsize', '64M'])
             if deckey:
                 self._cmd.extend(["-decryption_key", deckey])
             self._cmd.extend(["-i", str(np.path)])
