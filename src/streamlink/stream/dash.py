@@ -107,6 +107,8 @@ class DASHStreamWorker(SegmentedStreamWorker):
                     self.mpd.minimumUpdatePeriod.total_seconds(),
                     self.mpd.periods[0].duration.total_seconds(),
                 ) or 5
+                if refresh_wait == 6:
+                    refresh_wait = 1
 
             with self.sleeper(refresh_wait * back_off_factor):
                 if not representation:
