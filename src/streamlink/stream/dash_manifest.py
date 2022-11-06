@@ -448,8 +448,9 @@ class SegmentTemplate(MPDNode):
         else:
             now = datetime.datetime.now(utc)
             if self.presentationTimeOffset:
-                since_start = now - self.root.availabilityStartTime
-                available_start = now
+                since_start = (now - self.presentationTimeOffset) - self.root.availabilityStartTime
+                available_start_date = self.root.availabilityStartTime + self.presentationTimeOffset + since_start
+                available_start = available_start_date
             else:
                 since_start = now - self.root.availabilityStartTime
                 available_start = now
