@@ -1,9 +1,11 @@
-# [Streamlink][streamlink-website]
+# [Streamlink-DRM][streamlink-website]
 
 [![Github build status][workflow-status-badge]][workflow-status]
 [![codecov.io][codecov-coverage-badge]][codecov-coverage] [![Backers on Open Collective][opencollective-backers-badge]](#backers) [![Sponsors on Open Collective][opencollective-sponsors-badge]](#sponsors)
 
 Streamlink is a CLI utility which pipes video streams from various services into a video player, such as VLC.
+
+This streamlink build adds a --decryption_key parameter to decrypt dash content protected by DRM such as ClearKey 😉
 
 The main purpose of streamlink is to avoid resource-heavy and unoptimized websites, while still allowing the user to enjoy various streamed content.
 
