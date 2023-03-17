@@ -70,6 +70,7 @@ class Streamlink:
             "stream-timeout": 60.0,
             "ffmpeg-ffmpeg": None,
             "decryption_key": None,
+            "decryption_key_2": None,
             "ffmpeg-fout": None,
             "ffmpeg-video-transcode": None,
             "ffmpeg-audio-transcode": None,
@@ -158,6 +159,8 @@ class Streamlink:
                                  e.g. ``/usr/local/bin/ffmpeg``
                                  
         decryption_key           (str) Specify the decryption stream key
+
+        decryption_key_2         (str) Specify the decryption stream key for track 2
 
         ffmpeg-verbose           (bool) Log stderr from ffmpeg to the
                                  console
