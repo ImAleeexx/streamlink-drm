@@ -7,6 +7,8 @@ Streamlink is a CLI utility which pipes video streams from various services into
 
 This streamlink build adds a --decryption_key parameter to decrypt dash content protected by DRM such as ClearKey 😉
 
+**Update 18/03/2023 : ** Added a --decryption_key_2 parameter to decrypt the second track such as audio tracks. The --decryption_key parameter is required to use this param.
+
 The main purpose of streamlink is to avoid resource-heavy and unoptimized websites, while still allowing the user to enjoy various streamed content.
 
 Streamlink is a fork of the [Livestreamer][livestreamer] project.
