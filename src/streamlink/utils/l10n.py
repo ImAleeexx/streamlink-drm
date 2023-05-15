@@ -4,6 +4,7 @@ from typing import Optional
 
 from pycountry import countries, languages  # type: ignore[import]
 
+
 DEFAULT_LANGUAGE = "en"
 DEFAULT_COUNTRY = "US"
 DEFAULT_LANGUAGE_CODE = f"{DEFAULT_LANGUAGE}_{DEFAULT_COUNTRY}"
@@ -28,10 +29,10 @@ class Country:
                 c.alpha_3,
                 c.numeric,
                 c.name,
-                getattr(c, "official_name", c.name)
+                getattr(c, "official_name", c.name),
             )
-        except (LookupError, KeyError):
-            raise LookupError(f"Invalid country code: {country}")
+        except LookupError as err:
+            raise LookupError(f"Invalid country code: {country}") from err
 
     def __eq__(self, other):
         return (
@@ -46,7 +47,7 @@ class Country:
             self.alpha3,
             self.numeric,
             self.name,
-            self.official_name
+            self.official_name,
         )
 
 
@@ -73,10 +74,10 @@ class Language:
                 getattr(lang, "alpha_2", ""),
                 lang.alpha_3,
                 lang.name,
-                getattr(lang, "bibliographic", "")
+                getattr(lang, "bibliographic", ""),
             )
-        except (LookupError, KeyError):
-            raise LookupError(f"Invalid language code: {language}")
+        except LookupError as err:
+            raise LookupError(f"Invalid language code: {language}") from err
 
     def __eq__(self, other):
         return (
@@ -90,7 +91,7 @@ class Language:
             self.alpha2,
             self.alpha3,
             self.name,
-            self.bibliographic
+            self.bibliographic,
         )
 
 

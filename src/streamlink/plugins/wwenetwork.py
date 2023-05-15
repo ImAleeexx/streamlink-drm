@@ -16,11 +16,12 @@ from streamlink.plugin.api import useragents
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.times import seconds_to_hhmmss
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://watch\.wwe\.com/(channel)?"
+    r"https?://watch\.wwe\.com/(channel)?",
 ))
 @pluginargument(
     "email",
@@ -37,7 +38,7 @@ log = logging.getLogger(__name__)
     help="A WWE Network account password to use with --wwenetwork-email.",
 )
 class WWENetwork(Plugin):
-    site_config_re = re.compile(r'''">window.__data = (\{.*?\})</script>''')
+    site_config_re = re.compile(r"""">window.__data = (\{.*?\})</script>""")
     stream_url = "https://dce-frontoffice.imggaming.com/api/v2/stream/{id}"
     live_url = "https://dce-frontoffice.imggaming.com/api/v2/event/live"
     login_url = "https://dce-frontoffice.imggaming.com/api/v2/login"
@@ -52,7 +53,7 @@ class WWENetwork(Plugin):
         self.auth_token = None
 
     def get_title(self):
-        return self.item_config['title']
+        return self.item_config["title"]
 
     def request(self, method, url, **kwargs):
         headers = kwargs.pop("headers", {})
@@ -73,14 +74,14 @@ class WWENetwork(Plugin):
             log.debug("API request failed: {0}:{1} ({2})".format(
                 data["status"],
                 data.get("code"),
-                "; ".join(data.get("messages", []))
+                "; ".join(data.get("messages", [])),
             ))
         return data
 
     def login(self, email, password):
         log.debug("Attempting login as {0}".format(email))
         # sets some required cookies to login
-        data = self.request('POST', self.login_url,
+        data = self.request("POST", self.login_url,
                             data=json.dumps({"id": email, "secret": password}),
                             headers={"Content-Type": "application/json"})
         if "authorisationToken" in data:
@@ -89,7 +90,7 @@ class WWENetwork(Plugin):
         return self.auth_token
 
     @property  # type: ignore
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=128)  # noqa: B019
     def item_config(self):
         log.debug("Loading page config")
         p = urlparse(self.url)
@@ -113,25 +114,25 @@ class WWENetwork(Plugin):
         :param content_id: contentId for the video
         :return:
         """
-        info = self.request('GET', self.stream_url.format(id=content_id))
-        return self.request('GET', info.get("playerUrlCallback"))
+        info = self.request("GET", self.stream_url.format(id=content_id))
+        return self.request("GET", info.get("playerUrlCallback"))
 
     def _get_video_id(self):
         #  check the page to find the contentId
         log.debug("Searching for content ID")
         try:
-            if self.item_config['type'] == "channel":
+            if self.item_config["type"] == "channel":
                 return self._get_live_id()
             else:
-                return "vod/{id}".format(id=self.item_config['customFields']['DiceVideoId'])
+                return "vod/{id}".format(id=self.item_config["customFields"]["DiceVideoId"])
         except KeyError:
             log.error("Could not find video ID")
             return
 
     def _get_live_id(self):
         log.debug("Loading live event")
-        res = self.request('GET', self.live_url)
-        for event in res.get('events', []):
+        res = self.request("GET", self.live_url)
+        for event in res.get("events", []):
             return "event/{sportId}/{propertyId}/{tournamentId}/{id}".format(**event)
 
     def _get_streams(self):
@@ -154,7 +155,7 @@ class WWENetwork(Plugin):
                 yield from HLSStream.parse_variant_playlist(
                     self.session,
                     info["hlsUrl"],
-                    start_offset=start_point
+                    start_offset=start_point,
                 ).items()
             else:
                 log.error("Could not find the HLS URL")

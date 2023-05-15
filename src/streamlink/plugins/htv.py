@@ -7,17 +7,18 @@ $region Vietnam
 
 import logging
 import re
-from datetime import date
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+from streamlink.utils.times import localnow
+
 
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?htv\.com\.vn/truc-tuyen(?:\?channel=(?P<channel>\w+)&?|$)"
+    r"https?://(?:www\.)?htv\.com\.vn/truc-tuyen(?:\?channel=(?P<channel>\w+)&?|$)",
 ))
 class HTV(Plugin):
     def get_channels(self):
@@ -58,7 +59,7 @@ class HTV(Plugin):
                 "channelid": channel_id,
                 "template": "AjaxSchedules.xslt",
                 "channelcode": channel_code,
-                "date": date.today().strftime("%d-%m-%Y"),
+                "date": localnow().strftime("%d-%m-%Y"),
             },
             schema=validate.Schema(
                 validate.parse_json(),

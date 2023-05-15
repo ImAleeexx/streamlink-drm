@@ -12,11 +12,12 @@ from urllib.parse import parse_qsl
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:drive|docs)\.google\.com/file/d/([^/]+)/?"
+    r"https?://(?:drive|docs)\.google\.com/file/d/([^/]+)/?",
 ))
 class GoogleDocs(Plugin):
     api_url = "https://docs.google.com/get_video_info"
@@ -28,8 +29,8 @@ class GoogleDocs(Plugin):
         data = dict(parse_qsl(res.text))
 
         if data["status"] == "ok":
-            fmts = dict([s.split('/')[:2] for s in data["fmt_list"].split(",")])
-            streams = [s.split('|') for s in data["fmt_stream_map"].split(",")]
+            fmts = dict([s.split("/")[:2] for s in data["fmt_list"].split(",")])
+            streams = [s.split("|") for s in data["fmt_stream_map"].split(",")]
             for qcode, url in streams:
                 _, h = fmts[qcode].split("x")
                 yield "{0}p".format(h), HTTPStream(self.session, url)

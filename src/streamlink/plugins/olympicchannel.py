@@ -15,11 +15,12 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(\w+\.)?(?:olympics|olympicchannel)\.com/(?:[\w-]+/)?../.+"
+    r"https?://(\w+\.)?(?:olympics|olympicchannel)\.com/(?:[\w-]+/)?../.+",
 ))
 class OlympicChannel(Plugin):
     def _get_streams(self):

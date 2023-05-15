@@ -13,11 +13,12 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?tv999\.bg/live"
+    r"https?://(?:www\.)?tv999\.bg/live",
 ))
 class TV999(Plugin):
     title = "TV999"
@@ -28,8 +29,8 @@ class TV999(Plugin):
             schema=validate.Schema(
                 validate.parse_html(),
                 validate.xml_xpath_string(xpath),
-                validate.any(None, validate.url())
-            )
+                validate.any(None, validate.url()),
+            ),
         )
 
     def _get_streams(self):

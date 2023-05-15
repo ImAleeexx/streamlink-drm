@@ -14,11 +14,12 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?huya\.com/(?P<channel>[^/]+)"
+    r"https?://(?:www\.)?huya\.com/(?P<channel>[^/]+)",
 ))
 class Huya(Plugin):
     QUALITY_WEIGHTS: Dict[str, int] = {}

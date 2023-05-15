@@ -1,7 +1,6 @@
 import logging
 import re
 import time
-import unittest
 from typing import Type
 from unittest.mock import Mock, call, patch
 
@@ -18,8 +17,9 @@ from streamlink.plugin import (
     pluginargument,
     pluginmatcher,
 )
+
 # noinspection PyProtectedMember
-from streamlink.plugin.plugin import Matcher, _COOKIE_KEYS
+from streamlink.plugin.plugin import _COOKIE_KEYS, Matcher
 from streamlink.session import Streamlink
 
 
@@ -49,7 +49,7 @@ class DeprecatedPlugin(FakePlugin):
 
 
 class TestPlugin:
-    @pytest.mark.parametrize("pluginclass,module,logger", [
+    @pytest.mark.parametrize(("pluginclass", "module", "logger"), [
         (Plugin, "plugin", "streamlink.plugin.plugin"),
         (FakePlugin, "test_plugin", "tests.test_plugin"),
         (RenamedPlugin, "baz", "foo.bar.baz"),
@@ -77,7 +77,7 @@ class TestPlugin:
 
         assert mock_load_cookies.call_args_list == [call()]
 
-    def test_constructor_wrapper(self, caplog: pytest.LogCaptureFixture):
+    def test_constructor_wrapper(self, recwarn: pytest.WarningsRecorder):
         session = Mock()
         with patch("streamlink.plugin.plugin.Cache") as mock_cache, \
              patch.object(DeprecatedPlugin, "load_cookies") as mock_load_cookies:
@@ -85,8 +85,12 @@ class TestPlugin:
 
         assert isinstance(plugin, DeprecatedPlugin)
         assert plugin.custom_attribute == "HTTP://LOCALHOST"
-        assert [(record.levelname, record.message) for record in caplog.records] == [
-            ("warning", "Initialized test_plugin plugin with deprecated constructor"),
+        assert [(record.category, str(record.message), record.filename) for record in recwarn.list] == [
+            (
+                FutureWarning,
+                "Initialized test_plugin plugin with deprecated constructor",
+                __file__,
+            ),
         ]
 
         assert plugin.session is session
@@ -103,24 +107,46 @@ class TestPlugin:
         assert mock_load_cookies.call_args_list == [call()]
 
 
-class TestPluginMatcher(unittest.TestCase):
-    @patch("builtins.repr", Mock(return_value="Foo"))
+class TestPluginMatcher:
+    # noinspection PyUnusedLocal
     def test_decorator(self):
-        with self.assertRaises(TypeError) as cm:
+        with pytest.raises(TypeError) as cm:
             @pluginmatcher(re.compile(""))
-            class Foo:
+            class MyPlugin:
                 pass
-        self.assertEqual(str(cm.exception), "Foo is not a Plugin")
+        assert str(cm.value) == "MyPlugin is not a Plugin"
 
-        @pluginmatcher(re.compile("foo", re.VERBOSE))
-        @pluginmatcher(re.compile("bar"), priority=HIGH_PRIORITY)
-        class Bar(FakePlugin):
+    # noinspection PyUnusedLocal
+    def test_named_duplicate(self):
+        with pytest.raises(ValueError, match=r"^A matcher named 'foo' has already been registered$"):
+            @pluginmatcher(re.compile("http://foo"), name="foo")
+            @pluginmatcher(re.compile("http://foo"), name="foo")
+            class MyPlugin(FakePlugin):
+                pass
+
+    def test_no_matchers(self):
+        class MyPlugin(FakePlugin):
             pass
 
-        self.assertEqual(Bar.matchers, [
+        plugin = MyPlugin(Mock(), "http://foo")
+        assert plugin.url == "http://foo"
+        assert plugin.matchers is None
+        assert plugin.matches == []
+        assert plugin.matcher is None
+        assert plugin.match is None
+
+    def test_matchers(self):
+        @pluginmatcher(re.compile("foo", re.VERBOSE))
+        @pluginmatcher(re.compile("bar"), priority=HIGH_PRIORITY)
+        @pluginmatcher(re.compile("baz"), priority=HIGH_PRIORITY, name="baz")
+        class MyPlugin(FakePlugin):
+            pass
+
+        assert MyPlugin.matchers == [
             Matcher(re.compile("foo", re.VERBOSE), NORMAL_PRIORITY),
-            Matcher(re.compile("bar"), HIGH_PRIORITY)
-        ])
+            Matcher(re.compile("bar"), HIGH_PRIORITY),
+            Matcher(re.compile("baz"), HIGH_PRIORITY, "baz"),
+        ]
 
     def test_url_setter(self):
         @pluginmatcher(re.compile("http://(foo)"))
@@ -130,28 +156,60 @@ class TestPluginMatcher(unittest.TestCase):
             pass
 
         plugin = MyPlugin(Mock(), "http://foo")
-        self.assertEqual(plugin.url, "http://foo")
-        self.assertEqual([m is not None for m in plugin.matches], [True, False, False])
-        self.assertEqual(plugin.matcher, plugin.matchers[0].pattern)
-        self.assertEqual(plugin.match.group(1), "foo")
+        assert plugin.url == "http://foo"
+        assert [m is not None for m in plugin.matches] == [True, False, False]
+        assert plugin.matcher is plugin.matchers[0].pattern
+        assert plugin.match.group(1) == "foo"
 
         plugin.url = "http://bar"
-        self.assertEqual(plugin.url, "http://bar")
-        self.assertEqual([m is not None for m in plugin.matches], [False, True, False])
-        self.assertEqual(plugin.matcher, plugin.matchers[1].pattern)
-        self.assertEqual(plugin.match.group(1), "bar")
+        assert plugin.url == "http://bar"
+        assert [m is not None for m in plugin.matches] == [False, True, False]
+        assert plugin.matcher is plugin.matchers[1].pattern
+        assert plugin.match.group(1) == "bar"
 
         plugin.url = "http://baz"
-        self.assertEqual(plugin.url, "http://baz")
-        self.assertEqual([m is not None for m in plugin.matches], [False, False, True])
-        self.assertEqual(plugin.matcher, plugin.matchers[2].pattern)
-        self.assertEqual(plugin.match.group(1), "baz")
+        assert plugin.url == "http://baz"
+        assert [m is not None for m in plugin.matches] == [False, False, True]
+        assert plugin.matcher is plugin.matchers[2].pattern
+        assert plugin.match.group(1) == "baz"
 
         plugin.url = "http://qux"
-        self.assertEqual(plugin.url, "http://qux")
-        self.assertEqual([m is not None for m in plugin.matches], [False, False, False])
-        self.assertEqual(plugin.matcher, None)
-        self.assertEqual(plugin.match, None)
+        assert plugin.url == "http://qux"
+        assert [m is not None for m in plugin.matches] == [False, False, False]
+        assert plugin.matcher is None
+        assert plugin.match is None
+
+    def test_named_matchers_and_matches(self):
+        @pluginmatcher(re.compile("http://foo"), name="foo")
+        @pluginmatcher(re.compile("http://bar"), name="bar")
+        class MyPlugin(FakePlugin):
+            pass
+
+        plugin = MyPlugin(Mock(), "http://foo")
+
+        assert plugin.matchers["foo"] is plugin.matchers[0]
+        assert plugin.matchers["bar"] is plugin.matchers[1]
+        with pytest.raises(IndexError):
+            plugin.matchers.__getitem__(2)
+        with pytest.raises(KeyError):
+            plugin.matchers.__getitem__("baz")
+
+        assert plugin.matches["foo"] is plugin.matches[0]
+        assert plugin.matches["bar"] is plugin.matches[1]
+        assert plugin.matches["foo"] is not None
+        assert plugin.matches["bar"] is None
+        with pytest.raises(IndexError):
+            plugin.matches.__getitem__(2)
+        with pytest.raises(KeyError):
+            plugin.matches.__getitem__("baz")
+
+        plugin.url = "http://bar"
+        assert plugin.matches["foo"] is None
+        assert plugin.matches["bar"] is not None
+
+        plugin.url = "http://baz"
+        assert plugin.matches["foo"] is None
+        assert plugin.matches["bar"] is None
 
 
 class TestPluginArguments:
@@ -183,8 +241,9 @@ class TestPluginArguments:
         assert tuple(arg.name for arg in MixedPlugin.arguments) == ("qux", "foo", "bar", "baz")
 
     def test_decorator_typerror(self):
-        with pytest.raises(TypeError) as cm:
-            with patch("builtins.repr", Mock(side_effect=lambda obj: obj.__name__)):
+        with patch("builtins.repr", Mock(side_effect=lambda obj: obj.__name__)):
+            with pytest.raises(TypeError) as cm:
+                # noinspection PyUnusedLocal
                 @pluginargument("foo")
                 class Foo:
                     pass
@@ -234,35 +293,31 @@ def _create_cookie_dict(name, value, expires=None):
 
 
 class TestCookies:
-    @pytest.fixture
-    def session(self):
-        return Streamlink()
-
-    @pytest.fixture
+    @pytest.fixture()
     def pluginclass(self):
         class MyPlugin(FakePlugin):
             __module__ = "myplugin"
 
         return MyPlugin
 
-    @pytest.fixture
+    @pytest.fixture()
     def plugincache(self, request):
         with patch("streamlink.plugin.plugin.Cache") as mock_cache:
             cache = mock_cache("plugin-cache.json", "myplugin")
             cache.get_all.return_value = request.param
             yield cache
 
-    @pytest.fixture
+    @pytest.fixture()
     def logger(self, pluginclass: Type[Plugin]):
         with patch("streamlink.plugin.plugin.logging") as mock_logging:
             yield mock_logging.getLogger(pluginclass.__module__)
 
-    @pytest.fixture
+    @pytest.fixture()
     def plugin(self, pluginclass: Type[Plugin], session: Streamlink, plugincache: Mock, logger: Mock):
         plugin = pluginclass(session, "http://test.se")
         assert plugin.cache is plugincache
         assert plugin.logger is logger
-        yield plugin
+        return plugin
 
     @staticmethod
     def _cookie_to_dict(cookie):

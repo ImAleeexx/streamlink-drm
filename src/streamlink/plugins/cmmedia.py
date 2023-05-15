@@ -12,6 +12,7 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
@@ -104,7 +105,7 @@ class CMMedia(Plugin):
                 self.session,
                 (
                     f"https://cdnapisec.kaltura.com/p/{p}/sp/{sp}/playManifest/entryId/{json['meta']['id']}"
-                    f"/flavorIds/{asset['id']}/format/applehttp/protocol/https/a.m3u8"
+                    + f"/flavorIds/{asset['id']}/format/applehttp/protocol/https/a.m3u8"
                 ),
                 name_fmt="{pixels}_{bitrate}",
             ).items()

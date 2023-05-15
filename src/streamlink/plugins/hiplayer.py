@@ -1,7 +1,6 @@
 """
 $description United Arab Emirates CDN hosting live content for various websites in The Middle East.
 $url alwasat.ly
-$url cnbcarabia.com
 $url media.gov.kw
 $url rotana.net
 $type live
@@ -16,6 +15,7 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
@@ -23,8 +23,6 @@ log = logging.getLogger(__name__)
     https?://(?:www\.)?
     (
         alwasat\.ly
-    |
-        cnbcarabia\.com
     |
         media\.gov\.kw
     |
@@ -49,8 +47,8 @@ class HiPlayer(Plugin):
                 ),
             ),
         )
-
         if not js_url:
+            log.error("Could not find JS URL")
             return
 
         log.debug(f"JS URL={js_url}")
@@ -58,9 +56,9 @@ class HiPlayer(Plugin):
         data = self.session.http.get(
             js_url,
             schema=validate.Schema(
-                re.compile(r"i\s*=\s*\[(.*)]\.join"),
+                re.compile(r"var \w+\s*=\s*\[(?P<data>.+)]\.join\([\"']{2}\)"),
                 validate.none_or_all(
-                    validate.get(1),
+                    validate.get("data"),
                     validate.transform(lambda s: re.sub(r"['\", ]", "", s)),
                     validate.transform(lambda s: base64.b64decode(s)),
                     validate.parse_json(),
@@ -76,13 +74,16 @@ class HiPlayer(Plugin):
                 ),
             ),
         )
+        if not data:
+            log.error("Could not find base64 encoded JSON data")
+            return
 
         hls_url = data["streamUrl"]
 
         if data["daiEnabled"]:
             log.debug("daiEnabled=true")
             hls_url = self.session.http.post(
-                self.DAI_URL.format(data['daiAssetKey']),
+                self.DAI_URL.format(data["daiAssetKey"]),
                 data={"api-key": data["daiApiKey"]},
                 schema=validate.Schema(
                     validate.parse_json(),

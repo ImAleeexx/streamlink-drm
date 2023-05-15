@@ -12,6 +12,7 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
@@ -34,7 +35,7 @@ class ArteTV(Plugin):
 
         json_url = self.API_URL.format(language, video_id or "LIVE")
         headers = {
-            "Authorization": f"Bearer {self.API_TOKEN}"
+            "Authorization": f"Bearer {self.API_TOKEN}",
         }
         streams, metadata = self.session.http.get(json_url, headers=headers, schema=validate.Schema(
             validate.parse_json(),
@@ -48,17 +49,17 @@ class ArteTV(Plugin):
                                 "slot": int,
                                 "protocol": validate.any("HLS", "HLS_NG"),
                             },
-                            validate.union_get("slot", "protocol", "url")
-                        )
-                    ]
+                            validate.union_get("slot", "protocol", "url"),
+                        ),
+                    ],
                 ),
                 "metadata": {
                     "title": str,
-                    "subtitle": validate.any(None, str)
-                }
+                    "subtitle": validate.any(None, str),
+                },
             }}},
             validate.get(("data", "attributes")),
-            validate.union_get("streams", "metadata")
+            validate.union_get("streams", "metadata"),
         ))
 
         if not streams:
@@ -66,7 +67,7 @@ class ArteTV(Plugin):
 
         self.title = f"{metadata['title']} - {metadata['subtitle']}" if metadata["subtitle"] else metadata["title"]
 
-        for slot, protocol, url in sorted(streams, key=itemgetter(0)):
+        for _slot, _protocol, url in sorted(streams, key=itemgetter(0)):
             return HLSStream.parse_variant_playlist(self.session, url)
 
 

@@ -14,11 +14,12 @@ from streamlink.stream.hls import HLSStream
 from streamlink.utils.parse import parse_qsd
 from streamlink.utils.url import update_qsd
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?mitele\.es/directo/(?P<channel>[\w-]+)"
+    r"https?://(?:www\.)?mitele\.es/directo/(?P<channel>[\w-]+)",
 ))
 class Mitele(Plugin):
     URL_CARONTE = "https://caronte.mediaset.es/delivery/channel/mmc/{channel}/mtweb"
@@ -45,11 +46,17 @@ class Mitele(Plugin):
                             [{
                                 "drm": bool,
                                 "format": str,
-                                "stream": validate.url(),
-                                "lid": validate.all(int, validate.transform(str)),
+                                "stream": validate.all(
+                                    validate.transform(str.strip),
+                                    validate.url(),
+                                ),
+                                "lid": validate.all(
+                                    int,
+                                    validate.transform(str),
+                                ),
                                 validate.optional("assetKey"): str,
                             }],
-                            validate.filter(lambda obj: obj["format"] == "hls")
+                            validate.filter(lambda obj: obj["format"] == "hls"),
                         ),
                     },
                 ),
@@ -86,7 +93,7 @@ class Mitele(Plugin):
                     {"code": int},
                     validate.all(
                         {"tokens": {str: {"cdn": str}}},
-                        validate.get("tokens")
+                        validate.get("tokens"),
                     ),
                 ),
             ),
@@ -106,7 +113,12 @@ class Mitele(Plugin):
             urls.add(update_qsd(stream["stream"], qsd, quote_via=lambda string, *_, **__: string))
 
         for url in urls:
-            yield from HLSStream.parse_variant_playlist(self.session, url, name_fmt="{pixels}_{bitrate}").items()
+            yield from HLSStream.parse_variant_playlist(
+                self.session,
+                url,
+                headers={"Origin": "https://www.mitele.es"},
+                name_fmt="{pixels}_{bitrate}",
+            ).items()
 
 
 __plugin__ = Mitele

@@ -15,17 +15,20 @@ from streamlink.stream.dash import DASHStream
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?atresplayer\.com/"
+    r"https?://(?:www\.)?atresplayer\.com/",
 ))
 class AtresPlayer(Plugin):
-    def _get_streams(self):
-        self.url = update_scheme("https://", self.url)
-        path = urlparse(self.url).path
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.url = update_scheme("https://", f"{self.url.rstrip('/')}/")
 
+    def _get_streams(self):
+        path = urlparse(self.url).path
         api_url = self.session.http.get(self.url, schema=validate.Schema(
             re.compile(r"""window.__PRELOADED_STATE__\s*=\s*({.*?});""", re.DOTALL),
             validate.none_or_all(

@@ -10,11 +10,12 @@ import re
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://player\.tvibo\.com/\w+/(?P<id>\d+)"
+    r"https?://player\.tvibo\.com/\w+/(?P<id>\d+)",
 ))
 class Tvibo(Plugin):
     _api_url = "http://panel.tvibo.com/api/player/streamurl/{id}"

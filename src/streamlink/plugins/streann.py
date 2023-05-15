@@ -21,11 +21,12 @@ from streamlink.stream.hls import HLSStream
 from streamlink.utils.crypto import decrypt_openssl
 from streamlink.utils.parse import parse_qsd
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://ott\.streann\.com/s(?:treaming|-secure)/player\.html"
+    r"https?://ott\.streann\.com/s(?:treaming|-secure)/player\.html",
 ))
 @pluginmatcher(re.compile(r"""
     https?://(?:www\.)?(?:
@@ -50,10 +51,13 @@ class Streann(Plugin):
     base_url = "https://ott.streann.com"
     get_time_url = base_url + "/web/services/public/get-server-time"
     token_url = base_url + "/loadbalancer/services/web-players/{playerId}/token/{type}/{dataId}/{deviceId}"
-    stream_url = base_url + "/loadbalancer/services/web-players/{type}s-reseller-secure/{dataId}/{playerId}" \
-                            "/{token}/{resellerId}/playlist.m3u8?date={time}&device-type=web&device-name=web" \
-                            "&device-os=web&device-id={deviceId}"
-    passphrase_re = re.compile(r'''CryptoJS\.AES\.decrypt\(.*?,\s*(['"])(?P<passphrase>(?:(?!\1).)*)\1\s*?\);''')
+    stream_url = (
+        base_url
+        + "/loadbalancer/services/web-players/{type}s-reseller-secure/{dataId}/{playerId}"
+        + "/{token}/{resellerId}/playlist.m3u8?date={time}&device-type=web&device-name=web"
+        + "&device-os=web&device-id={deviceId}"
+    )
+    passphrase_re = re.compile(r"""CryptoJS\.AES\.decrypt\(.*?,\s*(['"])(?P<passphrase>(?:(?!\1).)*)\1\s*?\);""")
 
     _device_id = None
     _domain = None
@@ -89,13 +93,13 @@ class Streann(Plugin):
         headers = {
             "Referer": self.url,
             "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded"
+            "Content-Type": "application/x-www-form-urlencoded",
         }
 
         res = self.session.http.post(
             self.token_url.format(deviceId=self.device_id, **config),
             data=pdata,
-            headers=headers
+            headers=headers,
         )
 
         if res.status_code == 204:
@@ -122,7 +126,7 @@ class Streann(Plugin):
             iframes = self.session.http.get(self.url, schema=validate.Schema(
                 validate.parse_html(),
                 validate.xml_findall(".//iframe[@src]"),
-                validate.filter(lambda elem: urlparse(elem.attrib.get("src")).netloc == "ott.streann.com")
+                validate.filter(lambda elem: urlparse(elem.attrib.get("src")).netloc == "ott.streann.com"),
             ))
             if not iframes:
                 log.error("Could not find 'ott.streann.com' iframe")

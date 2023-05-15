@@ -4,12 +4,14 @@ import os
 import random
 import tempfile
 import threading
+from contextlib import suppress
 from pathlib import Path
 
 from streamlink.compat import is_win32
 
+
 try:
-    from ctypes import windll, cast, c_ulong, c_void_p, byref  # type: ignore[attr-defined]
+    from ctypes import byref, c_ulong, c_void_p, cast, windll  # type: ignore[attr-defined]
 except ImportError:
     pass
 
@@ -24,7 +26,7 @@ class NamedPipeBase(abc.ABC):
     path: Path
 
     def __init__(self):
-        global _id
+        global _id  # noqa: PLW0603
         with _lock:
             _id += 1
             self.name = f"streamlinkpipe-{os.getpid()}-{_id}-{random.randint(0, 9999)}"
@@ -64,11 +66,15 @@ class NamedPipePosix(NamedPipeBase):
         return self.fifo.write(data)
 
     def close(self):
-        if self.fifo:
-            self.fifo.close()
+        try:
+            if self.fifo is not None:
+                self.fifo.close()
+        except OSError:
+            raise
+        finally:
+            with suppress(OSError):
+                self.path.unlink()
             self.fifo = None
-        if self.path.is_fifo():
-            os.unlink(self.path)
 
 
 class NamedPipeWindows(NamedPipeBase):
@@ -97,7 +103,7 @@ class NamedPipeWindows(NamedPipeBase):
             self.bufsize,
             self.bufsize,
             0,
-            None
+            None,
         )
         if self.pipe == self.INVALID_HANDLE_VALUE:
             self._get_last_error()
@@ -112,14 +118,18 @@ class NamedPipeWindows(NamedPipeBase):
             cast(data, c_void_p),
             len(data),
             byref(written),
-            None
+            None,
         )
         return written.value
 
     def close(self):
-        if self.pipe is not None:
-            windll.kernel32.DisconnectNamedPipe(self.pipe)
-            windll.kernel32.CloseHandle(self.pipe)
+        try:
+            if self.pipe is not None:
+                windll.kernel32.DisconnectNamedPipe(self.pipe)
+                windll.kernel32.CloseHandle(self.pipe)
+        except OSError:
+            raise
+        finally:
             self.pipe = None
 
 

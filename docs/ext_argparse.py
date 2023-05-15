@@ -22,7 +22,7 @@ _block_re = re.compile(r":\n{2}\s{2}")
 _default_re = re.compile(r"Default is (.+)\.\n")
 _note_re = re.compile(r"Note: (.*)(?:\n\n|\n*$)", re.DOTALL)
 _option_line_re = re.compile(r"^(?!\s{2,}%\(prog\)s|\s{2,}--\w[\w-]*\w\b|Example: )(.+)$", re.MULTILINE)
-_option_re = re.compile(r"(?:^|(?<=\s))(--\w[\w-]*\w)\b")
+_option_re = re.compile(r"(?:^|(?<=\s))(?P<arg>--\w[\w-]*\w)(?P<val>=\w+)?\b")
 _prog_re = re.compile(r"%\(prog\)s")
 _percent_re = re.compile(r"%%")
 _cli_metadata_variables_section_cross_link_re = re.compile(r"the \"Metadata variables\" section")
@@ -50,61 +50,55 @@ class ArgparseDirective(Directive):
 
     _headlines = ["^", "~"]
 
-    def process_help(self, help):
+    def process_help(self, helptext):
         # Dedent the help to make sure we are always dealing with
         # non-indented text.
-        help = dedent(help)
+        helptext = dedent(helptext)
 
-        help = _inline_code_block_re.sub(
+        helptext = _inline_code_block_re.sub(
             lambda m: (
-                ":code:`{0}`".format(m.group(1).replace('\\', '\\\\'))
+                ":code:`{0}`".format(m.group(1).replace("\\", "\\\\"))
             ),
-            help
+            helptext,
         )
 
-        help = _example_inline_code_block_re.sub(r":code:`\1`", help)
+        helptext = _example_inline_code_block_re.sub(r":code:`\1`", helptext)
 
         # Replace option references with links.
         # Do this before indenting blocks and notes.
-        help = _option_line_re.sub(
-            lambda m: (
-                _option_re.sub(
-                    lambda m2: (
-                        ":option:`{0}`".format(m2.group(1))
-                        if m2.group(1) in self._available_options
-                        else m2.group(0)
-                    ),
-                    m.group(1)
-                )
+        helptext = _option_line_re.sub(
+            lambda m: _option_re.sub(
+                lambda m2: f":option:`{m2['arg']}{m2['val'] or ''}`" if m2["arg"] in self._available_options else m2[0],
+                m[1],
             ),
-            help
+            helptext,
         )
 
         # Create simple blocks.
-        help = _block_re.sub("::\n\n  ", help)
+        helptext = _block_re.sub("::\n\n  ", helptext)
 
         # Boldify the default value.
-        help = _default_re.sub(r"Default is: **\1**.\n", help)
+        helptext = _default_re.sub(r"Default is: **\1**.\n", helptext)
 
         # Create note directives from "Note: " paragraphs.
-        help = _note_re.sub(
+        helptext = _note_re.sub(
             lambda m: ".. note::\n\n" + indent(m.group(1)) + "\n\n",
-            help
+            helptext,
         )
 
         # workaround to replace %(prog)s with streamlink
-        help = _prog_re.sub("streamlink", help)
+        helptext = _prog_re.sub("streamlink", helptext)
 
         # fix escaped chars for percent-formatted argparse help strings
-        help = _percent_re.sub("%", help)
+        helptext = _percent_re.sub("%", helptext)
 
         # create cross-link for the "Metadata variables" section
-        help = _cli_metadata_variables_section_cross_link_re.sub(
+        helptext = _cli_metadata_variables_section_cross_link_re.sub(
             "the \":ref:`Metadata variables <cli/metadata:Variables>`\" section",
-            help
+            helptext,
         )
 
-        return indent(help)
+        return indent(helptext)
 
     def generate_group_rst(self, group):
         for action in group._group_actions:
@@ -138,9 +132,6 @@ class ArgparseDirective(Directive):
             for line in self.process_help(action.help).split("\n"):
                 yield line
             yield ""
-            if hasattr(action, "plugins") and len(action.plugins) > 0:
-                yield f"    **Supported plugins:** {', '.join(action.plugins)}"
-                yield ""
 
     def generate_parser_rst(self, parser, parent=None, depth=0):
         if depth >= len(self._headlines):

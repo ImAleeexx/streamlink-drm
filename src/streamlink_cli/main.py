@@ -1,41 +1,33 @@
 import argparse
-import errno
 import logging
 import os
 import platform
 import re
 import signal
 import sys
+import warnings
 from contextlib import closing, suppress
-from functools import partial
 from gettext import gettext
-from itertools import chain
 from pathlib import Path
 from time import sleep
-from typing import Any, Dict, Iterator, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 import streamlink.logger as logger
 from streamlink import NoPluginError, PluginError, StreamError, Streamlink, __version__ as streamlink_version
-from streamlink.compat import is_win32
-from streamlink.exceptions import FatalPluginError
+from streamlink.exceptions import FatalPluginError, StreamlinkDeprecationWarning
 from streamlink.plugin import Plugin, PluginOptions
 from streamlink.stream.stream import Stream, StreamIO
 from streamlink.utils.named_pipe import NamedPipe
+from streamlink.utils.times import LOCAL as LOCALTIMEZONE
 from streamlink_cli.argparser import ArgumentParser, build_parser, setup_session_options
 from streamlink_cli.compat import DeprecatedPath, importlib_metadata, stdout
 from streamlink_cli.console import ConsoleOutput, ConsoleUserInputRequester
 from streamlink_cli.constants import CONFIG_FILES, DEFAULT_STREAM_METADATA, LOG_DIR, PLUGIN_DIRS, STREAM_SYNONYMS
-from streamlink_cli.output import FileOutput, PlayerOutput
-from streamlink_cli.utils import Formatter, HTTPServer, datetime
-from streamlink_cli.utils.progress import Progress
+from streamlink_cli.output import FileOutput, HTTPOutput, PlayerOutput
+from streamlink_cli.streamrunner import StreamRunner
+from streamlink_cli.utils import Formatter, datetime
 from streamlink_cli.utils.versioncheck import check_version
 
-
-ACCEPTABLE_ERRNO = (errno.EPIPE, errno.EINVAL, errno.ECONNRESET)
-try:
-    ACCEPTABLE_ERRNO += (errno.WSAECONNABORTED,)  # type: ignore
-except AttributeError:
-    pass  # Not windows
 
 QUIET_OPTIONS = ("json", "stream_url", "quiet")
 
@@ -60,11 +52,11 @@ def get_formatter(plugin: Plugin):
             "category": lambda: plugin.get_category(),
             "game": lambda: plugin.get_category(),
             "title": lambda: plugin.get_title(),
-            "time": lambda: datetime.now()
+            "time": lambda: datetime.now(tz=LOCALTIMEZONE),
         },
         {
-            "time": lambda dt, fmt: dt.strftime(fmt)
-        }
+            "time": lambda dt, fmt: dt.strftime(fmt),
+        },
     )
 
 
@@ -117,11 +109,10 @@ def create_output(formatter: Formatter) -> Union[FileOutput, PlayerOutput]:
 
     elif not args.player:
         console.exit(
-            "The default player (VLC) does not seem to be "
-            "installed. You must specify the path to a player "
-            "executable with --player, a file path to save the "
-            "stream with --output, or pipe the stream to "
-            "another program with --stdout."
+            "The default player (VLC) does not seem to be installed."
+            + " You must specify the path to a player executable with --player,"
+            + " a file path to save the stream with --output,"
+            + " or pipe the stream to another program with --stdout.",
         )
         return  # type: ignore
 
@@ -153,39 +144,24 @@ def create_output(formatter: Formatter) -> Union[FileOutput, PlayerOutput]:
             namedpipe=namedpipe,
             http=http,
             record=record,
-            title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url
+            title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url,
         )
 
 
-def create_http_server(*_args, **_kwargs):
-    """Creates an HTTP server listening on a given host and port.
-
-    If host is empty, listen on all available interfaces, and if port is 0,
-    listen on a random high port.
+def create_http_server(host: Optional[str] = None, port: int = 0) -> HTTPOutput:
+    """
+    Create an HTTP server listening on a given host and port.
+    If host is None, listen on all available interfaces.
+    If port is 0, listen on a random high port.
     """
 
     try:
-        http = HTTPServer()
-        http.bind(*_args, **_kwargs)
+        httpoutput = HTTPOutput(host, port)
+        httpoutput.start_server()
+        return httpoutput
     except OSError as err:
         console.exit(f"Failed to create HTTP server: {err}")
-        return
-
-    return http
-
-
-def iter_http_requests(server, player):
-    """Repeatedly accept HTTP connections on a server.
-
-    Forever if the serving externally, or while a player is running if it is not
-    empty.
-    """
-
-    while not player or player.running:
-        try:
-            yield server.open(timeout=2.5)
-        except OSError:
-            continue
+        raise
 
 
 def output_stream_http(
@@ -201,9 +177,10 @@ def output_stream_http(
 
     if not external:
         if not args.player:
-            console.exit("The default player (VLC) does not seem to be "
-                         "installed. You must specify the path to a player "
-                         "executable with --player.")
+            console.exit(
+                "The default player (VLC) does not seem to be installed."
+                + " You must specify the path to a player executable with --player.",
+            )
 
         server = create_http_server()
         player = output = PlayerOutput(
@@ -211,7 +188,7 @@ def output_stream_http(
             args=args.player_args,
             filename=server.url,
             quiet=not args.verbose_player,
-            title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url
+            title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url,
         )
 
         try:
@@ -221,7 +198,7 @@ def output_stream_http(
         except OSError as err:
             console.exit(f"Failed to start player: {args.player} ({err})")
     else:
-        server = create_http_server(host=None, port=port)
+        server = create_http_server(args.player_external_http_interface, port)
         player = None
 
         log.info("Starting server, access with one of:")
@@ -229,8 +206,14 @@ def output_stream_http(
             log.info(f" {url}")
 
     initial_streams_used = False
-    for req in iter_http_requests(server, player):
-        user_agent = req.headers.get("User-Agent") or "unknown player"
+    while not player or player.running:
+        try:
+            server.accept_connection(timeout=2.5)
+            server.open()
+        except OSError:
+            continue
+
+        user_agent = server.request.headers.get("User-Agent") or "unknown player"
         log.info(f"Got HTTP request from {user_agent}")
 
         stream_fd = prebuffer = None
@@ -262,16 +245,21 @@ def output_stream_http(
 
         if stream_fd and prebuffer:
             log.debug("Writing stream to player")
-            read_stream(stream_fd, server, prebuffer, formatter)
+            stream_runner = StreamRunner(stream_fd, server)
+            try:
+                stream_runner.run(prebuffer)
+            except OSError as err:
+                # TODO: refactor all console.exit() calls
+                console.exit(str(err))
 
         if not continuous:
             break
 
-        server.close(True)
+        server.close()
 
     if player:
         player.close()
-    server.close()
+    server.shutdown()
 
 
 def output_stream_passthrough(stream, formatter: Formatter):
@@ -290,7 +278,7 @@ def output_stream_passthrough(stream, formatter: Formatter):
         filename=f'"{url}"',
         call=True,
         quiet=not args.verbose_player,
-        title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url
+        title=formatter.title(args.title, defaults=DEFAULT_STREAM_METADATA) if args.title else args.url,
     )
 
     try:
@@ -316,7 +304,7 @@ def open_stream(stream):
     try:
         stream_fd = stream.open()
     except StreamError as err:
-        raise StreamError(f"Could not open stream: {err}")
+        raise StreamError(f"Could not open stream: {err}") from err
 
     # Read 8192 bytes before proceeding to check for errors.
     # This is to avoid opening the output unnecessarily.
@@ -325,7 +313,7 @@ def open_stream(stream):
         prebuffer = stream_fd.read(8192)
     except OSError as err:
         stream_fd.close()
-        raise StreamError(f"Failed to read data from stream: {err}")
+        raise StreamError(f"Failed to read data from stream: {err}") from err
 
     if not prebuffer:
         stream_fd.close()
@@ -364,72 +352,27 @@ def output_stream(stream, formatter: Formatter):
             console.exit(f"Failed to open output ({err}")
         return
 
-    with closing(output):
-        log.debug("Writing stream to output")
-        read_stream(stream_fd, output, prebuffer, formatter)
+    try:
+        with closing(output):
+            log.debug("Writing stream to output")
+            show_progress = args.progress == "force" or args.progress == "yes" and sys.stderr.isatty()
+            if args.force_progress:
+                show_progress = True
+                warnings.warn(
+                    "The --force-progress option has been deprecated in favor of --progress=force",
+                    StreamlinkDeprecationWarning,
+                    stacklevel=1,
+                )
+            # TODO: finally clean up the global variable mess and refactor the streamlink_cli package
+            # noinspection PyUnboundLocalVariable
+            stream_runner = StreamRunner(stream_fd, output, show_progress=show_progress)
+            # noinspection PyUnboundLocalVariable
+            stream_runner.run(prebuffer)
+    except OSError as err:
+        # TODO: refactor all console.exit() calls
+        console.exit(str(err))
 
     return True
-
-
-def read_stream(stream, output, prebuffer, formatter: Formatter, chunk_size=8192):
-    """Reads data from stream and then writes it to the output."""
-    is_player = isinstance(output, PlayerOutput)
-    is_http = isinstance(output, HTTPServer)
-    is_fifo = is_player and output.namedpipe
-    show_progress = (
-        isinstance(output, FileOutput)
-        and output.fd is not stdout
-        and (sys.stdout.isatty() or args.force_progress)
-    )
-    show_record_progress = (
-        hasattr(output, "record")
-        and isinstance(output.record, FileOutput)
-        and output.record.fd is not stdout
-        and (sys.stdout.isatty() or args.force_progress)
-    )
-
-    progress: Optional[Progress] = None
-    stream_iterator: Iterator = chain(
-        [prebuffer],
-        iter(partial(stream.read, chunk_size), b"")
-    )
-    if show_progress or show_record_progress:
-        progress = Progress(
-            sys.stderr,
-            output.filename or output.record.filename,
-        )
-        stream_iterator = progress.iter(stream_iterator)
-
-    try:
-        for data in stream_iterator:
-            # We need to check if the player process still exists when
-            # using named pipes on Windows since the named pipe is not
-            # automatically closed by the player.
-            if is_win32 and is_fifo:
-                output.player.poll()
-
-                if output.player.returncode is not None:
-                    log.info("Player closed")
-                    break
-
-            try:
-                output.write(data)
-            except OSError as err:
-                if is_player and err.errno in ACCEPTABLE_ERRNO:
-                    log.info("Player closed")
-                elif is_http and err.errno in ACCEPTABLE_ERRNO:
-                    log.info("HTTP connection closed")
-                else:
-                    console.exit(f"Error when writing to output: {err}, exiting")
-
-                break
-    except OSError as err:
-        console.exit(f"Error when reading from stream: {err}, exiting")
-    finally:
-        if progress:
-            progress.close()
-        stream.close()
-        log.info("Stream ended")
 
 
 def handle_stream(plugin: Plugin, streams: Dict[str, Stream], stream_name: str) -> None:
@@ -450,7 +393,7 @@ def handle_stream(plugin: Plugin, streams: Dict[str, Stream], stream_name: str) 
     if args.json:
         console.msg_json(
             stream,
-            metadata=plugin.get_metadata()
+            metadata=plugin.get_metadata(),
         )
 
     elif args.stream_url:
@@ -468,12 +411,12 @@ def handle_stream(plugin: Plugin, streams: Dict[str, Stream], stream_name: str) 
 
         formatter = get_formatter(plugin)
 
-        for stream_name in [stream_name] + alt_streams:
-            stream = streams[stream_name]
+        for name in [stream_name] + alt_streams:
+            stream = streams[name]
             stream_type = type(stream).shortname()
 
             if stream_type in args.player_passthrough and not file_output:
-                log.info(f"Opening stream: {stream_name} ({stream_type})")
+                log.info(f"Opening stream: {name} ({stream_type})")
                 success = output_stream_passthrough(stream, formatter)
             elif args.player_external_http:
                 return output_stream_http(
@@ -487,7 +430,7 @@ def handle_stream(plugin: Plugin, streams: Dict[str, Stream], stream_name: str) 
             elif args.player_continuous_http and not file_output:
                 return output_stream_http(plugin, streams, formatter)
             else:
-                log.info(f"Opening stream: {stream_name} ({stream_type})")
+                log.info(f"Opening stream: {name} ({stream_type})")
                 success = output_stream(stream, formatter)
 
             if success:
@@ -558,17 +501,13 @@ def format_valid_streams(plugin: Plugin, streams: Dict[str, Stream]) -> str:
     delimiter = ", "
     validstreams = []
 
-    for name, stream in sorted(streams.items(),
-                               key=lambda stream: plugin.stream_weight(stream[0])):
+    for name, stream in sorted(streams.items(), key=lambda s: plugin.stream_weight(s[0])):
         if name in STREAM_SYNONYMS:
             continue
 
-        def synonymfilter(n):
-            return stream is streams[n] and n is not name
+        synonyms = [key for key, value in streams.items() if stream is value and key != name]
 
-        synonyms = list(filter(synonymfilter, streams.keys()))
-
-        if len(synonyms) > 0:
+        if synonyms:
             joined = delimiter.join(synonyms)
             name = f"{name} ({joined})"
 
@@ -629,7 +568,7 @@ def handle_url():
                 plugin=plugin.module,
                 metadata=plugin.get_metadata(),
                 streams=streams,
-                error=errmsg
+                error=errmsg,
             )
         else:
             console.exit(f"{errmsg}.\n       Available streams: {validstreams}")
@@ -637,7 +576,7 @@ def handle_url():
         console.msg_json(
             plugin=plugin.module,
             metadata=plugin.get_metadata(),
-            streams=streams
+            streams=streams,
         )
     elif args.stream_url:
         try:
@@ -667,12 +606,20 @@ def load_plugins(dirs: List[Path], showwarning: bool = True):
         if directory.is_dir():
             success = streamlink.load_plugins(str(directory))
             if success and type(directory) is DeprecatedPath:
-                log.warning(f"Loaded plugins from deprecated path, see CLI docs for how to migrate: {directory}")
+                warnings.warn(
+                    f"Loaded plugins from deprecated path, see CLI docs for how to migrate: {directory}",
+                    StreamlinkDeprecationWarning,
+                    stacklevel=1,
+                )
         elif showwarning:
             log.warning(f"Plugin path {directory} does not exist or is not a directory!")
 
 
-def setup_args(parser: argparse.ArgumentParser, config_files: List[Path] = None, ignore_unknown: bool = False):
+def setup_args(
+    parser: argparse.ArgumentParser,
+    config_files: Optional[List[Path]] = None,
+    ignore_unknown: bool = False,
+):
     """Parses arguments."""
     global args
     arglist = sys.argv[1:]
@@ -694,21 +641,28 @@ def setup_args(parser: argparse.ArgumentParser, config_files: List[Path] = None,
 
 
 def setup_config_args(parser, ignore_unknown=False):
+    if args.no_config:
+        return
+
     config_files = []
 
     if args.config:
-        # We want the config specified last to get highest priority
+        # We want the config specified last to get the highest priority
         config_files.extend(
             config_file
-            for config_file in map(lambda path: Path(path).expanduser(), reversed(args.config))
+            for config_file in [Path(path).expanduser() for path in reversed(args.config)]
             if config_file.is_file()
         )
 
     else:
         # Only load first available default config
-        for config_file in filter(lambda path: path.is_file(), CONFIG_FILES):
+        for config_file in filter(lambda path: path.is_file(), CONFIG_FILES):  # pragma: no branch
             if type(config_file) is DeprecatedPath:
-                log.warning(f"Loaded config from deprecated path, see CLI docs for how to migrate: {config_file}")
+                warnings.warn(
+                    f"Loaded config from deprecated path, see CLI docs for how to migrate: {config_file}",
+                    StreamlinkDeprecationWarning,
+                    stacklevel=1,
+                )
             config_files.append(config_file)
             break
 
@@ -716,12 +670,16 @@ def setup_config_args(parser, ignore_unknown=False):
         # Only load first available plugin config
         with suppress(NoPluginError):
             pluginname, pluginclass, resolved_url = streamlink.resolve_url(args.url)
-            for config_file in CONFIG_FILES:
+            for config_file in CONFIG_FILES:  # pragma: no branch
                 config_file = config_file.with_name(f"{config_file.name}.{pluginname}")
                 if not config_file.is_file():
                     continue
                 if type(config_file) is DeprecatedPath:
-                    log.warning(f"Loaded plugin config from deprecated path, see CLI docs for how to migrate: {config_file}")
+                    warnings.warn(
+                        f"Loaded plugin config from deprecated path, see CLI docs for how to migrate: {config_file}",
+                        StreamlinkDeprecationWarning,
+                        stacklevel=1,
+                    )
                 config_files.append(config_file)
                 break
 
@@ -771,11 +729,6 @@ def setup_plugin_args(session: Streamlink, parser: ArgumentParser):
                         continue
                     defaults[pargdest] = action.default
 
-                    # add plugin to global argument
-                    plugins = getattr(action, "plugins", [])
-                    plugins.append(pname)
-                    setattr(action, "plugins", plugins)
-
         plugin.options = PluginOptions(defaults)
 
 
@@ -812,7 +765,7 @@ def setup_plugin_options(session: Streamlink, pluginname: str, pluginclass: Type
                 session.set_plugin_option(
                     pluginname,
                     req.dest,
-                    console.askpass(prompt) if req.sensitive else console.ask(prompt)
+                    console.askpass(prompt) if req.sensitive else console.ask(prompt),
                 )
 
 
@@ -857,7 +810,6 @@ def log_current_versions():
 
 
 def log_current_arguments(session: Streamlink, parser: argparse.ArgumentParser):
-    global args
     if not logger.root.isEnabledFor(logging.DEBUG):
         return
 
@@ -875,7 +827,7 @@ def log_current_arguments(session: Streamlink, parser: argparse.ArgumentParser):
         if action.default != value:
             name = next(  # pragma: no branch
                 (option for option in action.option_strings if option.startswith("--")),
-                action.option_strings[0]
+                action.option_strings[0],
             ) if action.option_strings else action.dest
             log.debug(f" {name}={value if name not in sensitive else '*' * 8}")
 
@@ -884,20 +836,22 @@ def setup_logger_and_console(stream=sys.stdout, filename=None, level="info", jso
     global console
 
     if filename == "-":
-        filename = LOG_DIR / f"{datetime.now()}.log"
+        filename = LOG_DIR / f"{datetime.now(tz=LOCALTIMEZONE)}.log"
     elif filename:
         filename = Path(filename).expanduser().resolve()
 
     if filename:
         filename.parent.mkdir(parents=True, exist_ok=True)
 
+    verbose = level in ("trace", "all")
     streamhandler = logger.basicConfig(
         stream=stream,
         filename=filename,
         level=level,
         style="{",
-        format=("[{asctime}]" if level == "trace" else "") + "[{name}][{levelname}] {message}",
-        datefmt="%H:%M:%S" + (".%f" if level == "trace" else "")
+        format=f"{'[{asctime}]' if verbose else ''}[{{name}}][{{levelname}}] {{message}}",
+        datefmt=f"%H:%M:%S{'.%f' if verbose else ''}",
+        capture_warnings=True,
     )
 
     console = ConsoleOutput(streamhandler.stream, json)
@@ -990,7 +944,7 @@ def main():
         usage = parser.format_usage()
         console.msg(
             f"{usage}\n"
-            f"Use -h/--help to see the available options or read the manual at https://streamlink.github.io"
+            + "Use -h/--help to see the available options or read the manual at https://streamlink.github.io",
         )
 
     sys.exit(error_code)

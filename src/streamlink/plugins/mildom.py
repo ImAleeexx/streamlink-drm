@@ -14,6 +14,7 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import url_concat
 
+
 log = logging.getLogger(__name__)
 
 
@@ -76,7 +77,7 @@ class MildomAPI:
                         "video_link": [{"name": str, "url": validate.url()}],
                     },
                 },
-            })
+            }),
         )
         if self._is_api_error(data):
             return
@@ -101,11 +102,11 @@ class MildomAPI:
                     validate.optional("message"): str,
                     validate.optional("body"): {
                         "data": [
-                            {"token": str, }
+                            {"token": str },
                         ],
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
         if self._is_api_error(data):
             return
@@ -130,9 +131,9 @@ class MildomAPI:
                     validate.optional("message"): str,
                     validate.optional("body"): {
                         "stream_server": validate.url(),
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
         if self._is_api_error(data):
             return
@@ -167,7 +168,7 @@ class MildomAPI:
                         },
                     },
                 },
-            )
+            ),
         )
         if self._is_api_error(data):
             return

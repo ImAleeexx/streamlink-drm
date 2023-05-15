@@ -1,6 +1,36 @@
 Deprecations
 ============
 
+streamlink 5.4.0
+----------------
+
+Deprecation of --force-progress
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``--force-progress`` CLI argument has been deprecated in favor of :option:`--progress=force`.
+
+
+streamlink 5.3.0
+----------------
+
+Deprecation of global plugin arguments
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``is_global=True`` :py:class:`plugin argument <streamlink.options.Argument>` parameter has been deprecated.
+Instead of defining a global plugin argument to set a key-value pair on the plugin's options, use the respective option on
+the plugin's Streamlink session instance instead.
+
+
+streamlink 5.2.0
+----------------
+
+Deprecation of plugin.api.validate.text
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``plugin.api.validate.text`` alias for ``str`` has been marked as deprecated, as it is a remnant of the py2 implementation.
+Simply replace ``validate.text`` with ``str`` in each validation schema.
+
+
 streamlink 5.0.0
 ----------------
 

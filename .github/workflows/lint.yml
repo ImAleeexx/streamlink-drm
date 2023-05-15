@@ -25,14 +25,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
         with:
-          python-version: "3.7"
+          python-version: "3.11"
       - name: Install dependencies
         run: ./script/install-dependencies.sh
-      - name: flake8
+      - name: ruff
         run: >
-          python -m flake8
+          python -m ruff .
 
   typing:
     name: Typing
@@ -40,19 +40,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - name: Install dependencies
         run: |
           ./script/install-dependencies.sh
           python -m pip install -r docs-requirements.txt
       - name: mypy
-        run: >
-          python -m mypy
-          --no-incremental
-          src/streamlink/
-          src/streamlink_cli/
-          tests/
-          docs/
-          setup.py
+        run: |
+          python -m mypy --no-incremental
+          python -m mypy --no-incremental --python-version 3.8 docs

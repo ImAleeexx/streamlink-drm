@@ -3,16 +3,20 @@ from binascii import hexlify
 from functools import partial
 from threading import Event, Thread
 from typing import List
+from unittest.mock import patch
 
 import requests_mock
 
 from streamlink import Streamlink
-from streamlink.stream.hls import HLSStream, HLSStreamWriter as _HLSStreamWriter
+from streamlink.stream.hls import HLSStream, HLSStreamWorker as _HLSStreamWorker, HLSStreamWriter as _HLSStreamWriter
+from tests.testutils.handshake import Handshake
 
 
 TIMEOUT_AWAIT_READ = 5
 TIMEOUT_AWAIT_READ_ONCE = 5
 TIMEOUT_AWAIT_WRITE = 60  # https://github.com/streamlink/streamlink/issues/3868
+TIMEOUT_AWAIT_PLAYLIST_RELOAD = 5
+TIMEOUT_AWAIT_PLAYLIST_WAIT = 5
 TIMEOUT_AWAIT_CLOSE = 5
 
 
@@ -30,7 +34,7 @@ class Playlist(HLSItemBase):
         self.items = [
             Tag("EXTM3U"),
             Tag("EXT-X-VERSION", int(version)),
-            Tag("EXT-X-TARGETDURATION", int(targetduration))
+            Tag("EXT-X-TARGETDURATION", int(targetduration)),
         ]
         if mediasequence is not None:  # pragma: no branch
             self.items.append(Tag("EXT-X-MEDIA-SEQUENCE", int(mediasequence)))
@@ -84,16 +88,31 @@ class Segment(HLSItemBase):
         return "#EXTINF:{duration:.3f},{title}\n{path}".format(
             duration=self.duration,
             title=self.title,
-            path=self.path if self.path_relative else self.url(namespace)
+            path=self.path if self.path_relative else self.url(namespace),
         )
+
+
+class EventedHLSStreamWorker(_HLSStreamWorker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.handshake_reload = Handshake()
+        self.handshake_wait = Handshake()
+        self.time_wait = None
+
+    def reload_playlist(self):
+        with self.handshake_reload():
+            return super().reload_playlist()
+
+    def wait(self, time):
+        self.time_wait = time
+        with self.handshake_wait():
+            return not self.closed
 
 
 class EventedHLSStreamWriter(_HLSStreamWriter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.write_wait = Event()
-        self.write_done = Event()
-        self.write_error = None
+        self.handshake = Handshake()
 
     def _futures_put(self, item):
         self.futures.put_nowait(item)
@@ -107,19 +126,12 @@ class EventedHLSStreamWriter(_HLSStreamWriter):
 
     def write(self, *args, **kwargs):
         # only write once per step
-        self.write_wait.wait()
-        self.write_wait.clear()
-
-        try:
+        with self.handshake(Exception) as cm:
             # don't write again during teardown
             if not self.closed:
                 super().write(*args, **kwargs)
-        except Exception as err:  # pragma: no cover
-            self.write_error = err
+        if cm.error:  # pragma: no cover
             self.reader.close()
-        finally:
-            # notify main thread that writing has finished
-            self.write_done.set()
 
 
 class HLSStreamReadThread(Thread):
@@ -129,12 +141,10 @@ class HLSStreamReadThread(Thread):
     def __init__(self, session: Streamlink, stream: HLSStream, *args, **kwargs):
         super().__init__(*args, **kwargs, daemon=True)
 
-        self.read_wait = Event()
         self.read_once = Event()
-        self.read_done = Event()
+        self.handshake = Handshake()
         self.read_all = False
         self.data: List[bytes] = []
-        self.error = None
 
         self.session = session
         self.stream = stream
@@ -147,17 +157,14 @@ class HLSStreamReadThread(Thread):
             return self.writer_close()
 
         self.writer_close = self.reader.writer.close
-        self.reader.writer.close = _await_read_then_close
+        self.reader.writer.close = _await_read_then_close  # type: ignore[assignment]
 
     def run(self):
         while not self.reader.buffer.closed:
             # at least one read was attempted
             self.read_once.set()
             # only read once per step
-            self.read_wait.wait()
-            self.read_wait.clear()
-
-            try:
+            with self.handshake(OSError) as cm:
                 # don't read again during teardown
                 # if there is data left, close() was called manually, and it needs to be read
                 if self.reader.buffer.closed and self.reader.buffer.length == 0:
@@ -168,21 +175,18 @@ class HLSStreamReadThread(Thread):
                     return
 
                 self.data.append(self.reader.read(-1))
-            except OSError as err:
-                self.error = err
+
+            if cm.error:
                 return
-            finally:
-                # notify main thread that reading has finished
-                self.read_done.set()
 
     def reset(self):
-        self.data[:] = []
-        self.error = None
+        self.data.clear()
 
     def close(self):
-        self.reader.buffer.close()
+        self.reader.close()
         self.read_once.set()
-        self.read_wait.set()
+        # allow reader thread to terminate
+        self.handshake.go()
 
 
 class TestMixinStreamHLS(unittest.TestCase):
@@ -195,11 +199,16 @@ class TestMixinStreamHLS(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # FIXME: fix HTTPSession.request()
+        # don't sleep on mocked HTTP request failures
+        self._patch_http_retry_sleep = patch("streamlink.plugin.api.http_session.time.sleep")
         self.mocker = requests_mock.Mocker()
         self.mocks = {}
 
     def setUp(self):
         super().setUp()
+
+        self._patch_http_retry_sleep.start()
         self.mocker.start()
 
     def tearDown(self):
@@ -211,6 +220,8 @@ class TestMixinStreamHLS(unittest.TestCase):
 
         self.mocker.stop()
         self.mocks.clear()
+
+        self._patch_http_retry_sleep.stop()
 
     def mock(self, method, url, *args, **kwargs):
         self.mocks[url] = self.mocker.request(method, url, *args, **kwargs)
@@ -236,41 +247,37 @@ class TestMixinStreamHLS(unittest.TestCase):
         thread.reader.writer.join(timeout)
         thread.reader.worker.join(timeout)
         thread.join(timeout)
+        assert self.thread.reader.closed, "Stream reader is closed"
+
+    def await_playlist_reload(self, timeout=TIMEOUT_AWAIT_PLAYLIST_RELOAD) -> None:
+        worker: EventedHLSStreamWorker = self.thread.reader.worker  # type: ignore[assignment]
+        assert worker.is_alive()
+        assert worker.handshake_reload.step(timeout)
+
+    def await_playlist_wait(self, timeout=TIMEOUT_AWAIT_PLAYLIST_WAIT) -> None:
+        worker: EventedHLSStreamWorker = self.thread.reader.worker  # type: ignore[assignment]
+        assert worker.is_alive()
+        assert worker.handshake_wait.step(timeout)
 
     # make write calls on the write-thread and wait until it has finished
-    def await_write(self, write_calls=1, timeout=TIMEOUT_AWAIT_WRITE):
-        writer = self.thread.reader.writer
-        if not writer.is_alive():  # pragma: no cover
-            raise RuntimeError("Write thread is not alive")
-
-        for write_call in range(write_calls):
-            writer.write_wait.set()
-            done = writer.write_done.wait(timeout)
-            if writer.write_error:  # pragma: no cover
-                raise writer.write_error
-            if not done:  # pragma: no cover
-                raise RuntimeError(f"Await write timeout: write_call={write_call + 1}")
-            writer.write_done.clear()
+    def await_write(self, write_calls=1, timeout=TIMEOUT_AWAIT_WRITE) -> None:
+        writer: EventedHLSStreamWriter = self.thread.reader.writer  # type: ignore[assignment]
+        assert writer.is_alive()
+        for _ in range(write_calls):
+            assert writer.handshake.step(timeout)
 
     # make one read call on the read thread and wait until it has finished
     def await_read(self, read_all=False, timeout=TIMEOUT_AWAIT_READ):
         thread = self.thread
-        if not thread.is_alive():  # pragma: no cover
-            raise RuntimeError("Read thread is not alive")
-
         thread.read_all = read_all
-        thread.read_wait.set()
-        done = thread.read_done.wait(timeout)
 
-        try:
-            if thread.error:  # pragma: no cover
-                raise thread.error
-            if not done:  # pragma: no cover
-                raise RuntimeError(f"Await read timeout: read_all={read_all}")
-            return b"".join(thread.data)
-        finally:
-            thread.read_done.clear()
-            thread.reset()
+        assert thread.is_alive()
+        assert thread.handshake.step(timeout)
+
+        data = b"".join(thread.data)
+        thread.reset()
+
+        return data
 
     def get_session(self, options=None, *args, **kwargs):
         return Streamlink(options)
@@ -301,6 +308,7 @@ class TestMixinStreamHLS(unittest.TestCase):
     def close(self):
         thread = self.thread
         thread.reader.close()
+        # Allow writer and reader threads to terminate
         if isinstance(thread.reader.writer, EventedHLSStreamWriter):
-            thread.reader.writer.write_wait.set()
-        thread.read_wait.set()
+            thread.reader.writer.handshake.go()
+        thread.handshake.go()

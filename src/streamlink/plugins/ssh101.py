@@ -11,11 +11,12 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?ssh101\.com/(?:(?:secure)?live/|detail\.php\?id=\w+)"
+    r"https?://(?:www\.)?ssh101\.com/(?:(?:secure)?live/|detail\.php\?id=\w+)",
 ))
 class SSH101(Plugin):
     def _get_streams(self):

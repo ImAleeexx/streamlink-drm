@@ -6,11 +6,13 @@ $type live, vod
 
 import logging
 import re
+from textwrap import dedent
 from urllib.parse import urlparse
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+
 
 log = logging.getLogger(__name__)
 
@@ -53,11 +55,11 @@ class Picarto(Plugin):
                         }],
                     }),
                     "getLoadBalancerUrl": validate.any(None, {
-                        "url": validate.any(None, validate.transform(lambda url: urlparse(url).netloc))
-                    })
+                        "url": validate.any(None, validate.transform(lambda url: urlparse(url).netloc)),
+                    }),
                 },
                 validate.union_get("channel", "getMultiStreams", "getLoadBalancerUrl"),
-            )
+            ),
         )
         if not channel or not multistreams or not loadbalancer:
             log.debug("Missing channel or streaming data")
@@ -81,27 +83,27 @@ class Picarto(Plugin):
 
         hls_url = self.HLS_URL.format(
             netloc=loadbalancer["url"],
-            file_name=channel["stream_name"]
+            file_name=channel["stream_name"],
         )
 
         return HLSStream.parse_variant_playlist(self.session, hls_url)
 
     def get_vod(self, vod_id):
         data = {
-            'query': (
-                'query ($videoId: ID!) {\n'
-                '  video(id: $videoId) {\n'
-                '    id\n'
-                '    title\n'
-                '    file_name\n'
-                '    video_recording_image_url\n'
-                '    channel {\n'
-                '      name\n'
-                '      }'
-                '  }\n'
-                '}\n'
-            ),
-            'variables': {'videoId': vod_id},
+            "query": dedent("""
+                query ($videoId: ID!) {
+                  video(id: $videoId) {
+                    id
+                    title
+                    file_name
+                    video_recording_image_url
+                    channel {
+                      name
+                    }
+                  }
+                }
+            """).lstrip(),
+            "variables": {"videoId": vod_id},
         }
         vod_data = self.session.http.post(self.API_URL_VOD, json=data, schema=validate.Schema(
             validate.parse_json(),
@@ -114,7 +116,7 @@ class Picarto(Plugin):
                     "channel": {"name": str},
                 }),
             }},
-            validate.get(("data", "video"))
+            validate.get(("data", "video")),
         ))
 
         if not vod_data:
@@ -130,7 +132,7 @@ class Picarto(Plugin):
         netloc = urlparse(vod_data["video_recording_image_url"]).netloc
         hls_url = self.HLS_URL.format(
             netloc=netloc,
-            file_name=vod_data["file_name"]
+            file_name=vod_data["file_name"],
         )
 
         return HLSStream.parse_variant_playlist(self.session, hls_url)
@@ -138,12 +140,12 @@ class Picarto(Plugin):
     def _get_streams(self):
         m = self.match.groupdict()
 
-        if m['po_vod_id'] or m['vod_id']:
-            log.debug('Type=VOD')
-            return self.get_vod(m['po_vod_id'] or m['vod_id'])
-        elif m['po_user'] or m['user']:
-            log.debug('Type=Live')
-            return self.get_live(m['po_user'] or m['user'])
+        if m["po_vod_id"] or m["vod_id"]:
+            log.debug("Type=VOD")
+            return self.get_vod(m["po_vod_id"] or m["vod_id"])
+        elif m["po_user"] or m["user"]:
+            log.debug("Type=Live")
+            return self.get_live(m["po_user"] or m["user"])
 
 
 __plugin__ = Picarto

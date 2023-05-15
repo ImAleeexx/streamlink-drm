@@ -1,13 +1,14 @@
 """
 $description Russian live-streaming and video hosting social platform.
 $url vk.com
+$url vk.ru
 $type live, vod
 """
 
 import logging
 import re
 from hashlib import md5
-from urllib.parse import parse_qsl, unquote, urlparse
+from urllib.parse import parse_qsl, unquote, urlparse, urlunparse
 
 from streamlink.exceptions import NoStreamsError
 from streamlink.plugin import Plugin, PluginError, pluginmatcher
@@ -16,14 +17,15 @@ from streamlink.stream.dash import DASHStream
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import update_qsd
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:\w+\.)?vk\.com/videos?(?:\?z=video)?(?P<video_id>-?\d+_\d+)"
+    r"https?://(?:\w+\.)?vk\.(?:com|ru)/videos?(?:\?z=video)?(?P<video_id>-?\d+_\d+)",
 ))
 @pluginmatcher(re.compile(
-    r"https?://(\w+\.)?vk\.com/.+"
+    r"https?://(\w+\.)?vk\.(?:com|ru)/.+",
 ))
 class VK(Plugin):
     API_URL = "https://vk.com/al_video.php"
@@ -42,7 +44,8 @@ class VK(Plugin):
                     self.session.http.cookies.update(res.cookies)
                     return res
 
-        self.session.http.get("https://vk.com/", hooks={"response": on_response})
+        url = urlunparse(urlparse(self.url)._replace(path="", query="", fragment=""))
+        self.session.http.get(url, hooks={"response": on_response})
 
     def _has_video_id(self):
         return any(self.matches[:-1])
@@ -64,14 +67,14 @@ class VK(Plugin):
             self.url = self.session.http.get(self.url, schema=validate.Schema(
                 validate.parse_html(),
                 validate.xml_xpath_string(".//head/meta[@property='og:url'][@content]/@content"),
-                str
+                str,
             ))
         except PluginError:
             pass
         if self._has_video_id():
             return
 
-        raise NoStreamsError(self.url)
+        raise NoStreamsError
 
     def _get_streams(self):
         self._get_cookies()
@@ -102,8 +105,8 @@ class VK(Plugin):
                         validate.optional("manifest"): validate.startswith("<?xml"),
                         validate.optional("md_author"): validate.any(str, None),
                         validate.optional("md_title"): validate.any(str, None),
-                    }
-                )
+                    },
+                ),
             )
         except PluginError:
             log.error("Could not parse API response")

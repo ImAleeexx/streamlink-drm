@@ -11,6 +11,7 @@ from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWriter
 
+
 log = logging.getLogger(__name__)
 
 
@@ -28,7 +29,7 @@ class AfreecaHLSStream(HLSStream):
 
 
 @pluginmatcher(re.compile(
-    r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/(?P<bno>:\d+))?"
+    r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/(?P<bno>:\d+))?",
 ))
 @pluginargument(
     "username",
@@ -69,17 +70,17 @@ class AfreecaTV(Plugin):
                 validate.optional("RMD"): str,
                 validate.optional("AID"): str,
                 validate.optional("CDN"): str,
-            }
+            },
         },
-        validate.get("CHANNEL")
+        validate.get("CHANNEL"),
     )
     _schema_stream = validate.Schema(
         {
             validate.optional("view_url"): validate.url(
-                scheme=validate.any("rtmp", "http")
+                scheme=validate.any("rtmp", "http"),
             ),
             "stream_status": str,
-        }
+        },
     )
 
     def __init__(self, *args, **kwargs):

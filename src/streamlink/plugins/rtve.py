@@ -12,12 +12,13 @@ from io import BytesIO
 from typing import Iterator, Sequence, Tuple
 from urllib.parse import urlparse
 
-from streamlink.plugin import Plugin, pluginargument, pluginmatcher
+from streamlink.plugin import Plugin, PluginError, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.ffmpegmux import MuxedStream
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 from streamlink.utils.url import update_scheme
+
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class Base64Reader:
         def _iterate():
             while True:
                 chunk = stream.read(1)
-                if len(chunk) == 0:  # pragma: no cover
+                if len(chunk) == 0:
                     return
                 yield ord(chunk)
 
@@ -39,7 +40,7 @@ class Base64Reader:
         res = []
         for _ in range(num):
             item = next(self._iterator, None)
-            if item is None:  # pragma: no cover
+            if item is None:
                 break
             res.append(item)
         return res
@@ -62,6 +63,14 @@ class Base64Reader:
             raise ValueError("Invalid chunk length")
         self.skip(4)
         return chunktype, chunkdata
+
+    def __iter__(self):
+        self.skip(8)
+        while True:
+            try:
+                yield self.read_chunk()
+            except ValueError:
+                return
 
 
 class ZTNR:
@@ -106,26 +115,21 @@ class ZTNR:
     @classmethod
     def translate(cls, data: str) -> Iterator[Tuple[str, str]]:
         reader = Base64Reader(data.replace("\n", ""))
-        reader.skip(8)
-        chunk_type, chunk_data = reader.read_chunk()
-        while chunk_type != "IEND":
+        for chunk_type, chunk_data in reader:
+            if chunk_type == "IEND":
+                break
             if chunk_type == "tEXt":
                 content = "".join(chr(item) for item in chunk_data if item > 0)
-                if "#" not in content or "%%" not in content:  # pragma: no cover
+                if "#" not in content or "%%" not in content:
                     continue
                 alphabet, content = content.split("#", 1)
                 quality, content = content.split("%%", 1)
                 yield quality, cls._get_source(alphabet, content)
-            chunk_type, chunk_data = reader.read_chunk()
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?rtve\.es/play/videos/.+"
+    r"https?://(?:www\.)?rtve\.es/play/videos/.+",
 ))
-@pluginargument(
-    "mux-subtitles",
-    is_global=True,
-)
 class Rtve(Plugin):
     URL_M3U8 = "https://ztnr.rtve.es/ztnr/{id}.m3u8"
     URL_VIDEOS = "https://ztnr.rtve.es/ztnr/movil/thumbnail/rtveplayw/videos/{id}.png?q=v2"
@@ -147,18 +151,19 @@ class Rtve(Plugin):
             return
 
         # check obfuscated stream URLs via self.URL_VIDEOS and ZTNR.translate() first
-        # self.URL_M3U8 appears to be valid for all streams, but doesn't provide any content in same cases
-        urls = self.session.http.get(
-            self.URL_VIDEOS.format(id=self.id),
-            schema=validate.Schema(
-                validate.transform(ZTNR.translate),
-                validate.transform(list),
-                [(str, validate.url())],
-            ),
-        )
-
-        # then fall back to self.URL_M3U8
-        if not urls:
+        # self.URL_M3U8 appears to be valid for all streams, but doesn't provide any content in some cases
+        try:
+            urls = self.session.http.get(
+                self.URL_VIDEOS.format(id=self.id),
+                schema=validate.Schema(
+                    validate.transform(ZTNR.translate),
+                    validate.transform(list),
+                    [(str, validate.url())],
+                    validate.length(1),
+                ),
+            )
+        except PluginError:
+            # catch HTTP errors and validation errors, and fall back to generic HLS URL template
             url = self.URL_M3U8.format(id=self.id)
         else:
             url = next((url for _, url in urls if urlparse(url).path.endswith(".m3u8")), None)
@@ -170,7 +175,7 @@ class Rtve(Plugin):
 
         streams = HLSStream.parse_variant_playlist(self.session, url).items()
 
-        if self.options.get("mux-subtitles"):
+        if self.session.get_option("mux-subtitles"):
             subs = self.session.http.get(
                 self.URL_SUBTITLES.format(id=self.id),
                 schema=validate.Schema(

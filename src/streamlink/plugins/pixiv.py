@@ -7,16 +7,17 @@ $type live
 import logging
 import re
 
-from streamlink.exceptions import FatalPluginError, NoStreamsError, PluginError
+from streamlink.exceptions import FatalPluginError, NoStreamsError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+
 
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://sketch\.pixiv\.net/@?(?P<user>[^/]+)"
+    r"https?://sketch\.pixiv\.net/@?(?P<user>[^/]+)",
 ))
 @pluginargument(
     "sessionid",
@@ -48,32 +49,32 @@ class Pixiv(Plugin):
     _user_dict_schema = validate.Schema(
         {
             "user": {
-                "unique_name": validate.text,
-                "name": validate.text
+                "unique_name": str,
+                "name": str,
             },
             validate.optional("hls_movie"): {
-                "url": validate.text
-            }
-        }
+                "url": str,
+            },
+        },
     )
 
     _user_schema = validate.Schema(
         {
             "owner": _user_dict_schema,
             "performers": [
-                validate.any(_user_dict_schema, None)
-            ]
-        }
+                validate.any(_user_dict_schema, None),
+            ],
+        },
     )
 
     _data_lives_schema = validate.Schema(
         {
             "data": {
-                "lives": [_user_schema]
-            }
+                "lives": [_user_schema],
+            },
         },
         validate.get("data"),
-        validate.get("lives")
+        validate.get("lives"),
     )
 
     api_lives = "https://sketch.pixiv.net/api/lives.json"
@@ -89,8 +90,8 @@ class Pixiv(Plugin):
     def _login_using_session_id_and_device_token(self, session_id, device_token):
         self.session.http.get(self.login_url_get)
 
-        self.session.http.cookies.set('PHPSESSID', session_id, domain='.pixiv.net', path='/')
-        self.session.http.cookies.set('device_token', device_token, domain='.pixiv.net', path='/')
+        self.session.http.cookies.set("PHPSESSID", session_id, domain=".pixiv.net", path="/")
+        self.session.http.cookies.set("device_token", device_token, domain=".pixiv.net", path="/")
 
         self.save_cookies()
         log.info("Successfully set sessionId and deviceToken")
@@ -111,7 +112,7 @@ class Pixiv(Plugin):
             if item["owner"]["user"]["unique_name"] == self.match.group("user"):
                 return item
 
-        raise NoStreamsError(self.url)
+        raise NoStreamsError
 
     def _get_streams(self):
         login_session_id = self.get_option("sessionid")
@@ -157,9 +158,11 @@ class Pixiv(Plugin):
                         # other co-hosts
                         self.set_option("performer", co_hosts[number - 1][0])
                 except FatalPluginError:
-                    raise PluginError("Selected performer is invalid.")
+                    log.error("Selected performer is invalid.")
+                    return
                 except (IndexError, ValueError, TypeError):
-                    raise PluginError("Input is invalid")
+                    log.error("Input is invalid")
+                    return
 
         # ignore the owner stream, if a performer is selected
         # or use it when there are no other performers

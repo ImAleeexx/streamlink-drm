@@ -10,11 +10,12 @@ import re
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(www\.)?zengatv\.com/\w+"
+    r"https?://(www\.)?zengatv\.com/\w+",
 ))
 class ZengaTV(Plugin):
     """Streamlink Plugin for livestreams on zengatv.com"""

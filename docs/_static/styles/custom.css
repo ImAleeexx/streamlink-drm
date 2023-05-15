@@ -89,18 +89,18 @@ strong.command {
   font-style: normal;
 }
 
-a[href^="http://"]:not(.muted-link),
-a[href^="https://"]:not(.muted-link):not([href^="https://streamlink.github.io/"]) {
+a[href^="http://"]:not(.muted-link):not(.sd-badge),
+a[href^="https://"]:not(.muted-link):not(.sd-badge):not([href^="https://streamlink.github.io/"]) {
   display: inline-block;
   word-break: break-word;
 }
 
-a[href^="http://"]:not(.no-external-link-icon):not(.muted-link)::after,
-a[href^="https://"]:not(.no-external-link-icon):not(.muted-link):not([href^="https://streamlink.github.io/"])::after {
+a[href^="http://"]:not(.no-external-link-icon):not(.muted-link):not(.sd-badge)::after,
+a[href^="https://"]:not(.no-external-link-icon):not(.muted-link):not(.sd-badge):not([href^="https://streamlink.github.io/"])::after {
   content: "\f35d";
   display: inline-block;
   padding-left: .4em;
-  font: 900 .6em "Font Awesome 5 Free";
+  font: 900 .6em "Font Awesome 6 Free";
   vertical-align: middle;
   text-decoration: none;
 }
@@ -288,14 +288,29 @@ table.table-custom-layout.table-custom-layout-dependencies tbody td {
   Content
 */
 
-.github-avatar {
-  float: left;
-  width: 150px;
-  height: 150px;
-  margin: 0 1rem 1rem 0;
+.installation-grid .fab {
+  font-size: 5em;
 }
-.github-avatar + .container > ul > li {
-  list-style: none;
+
+.grid-with-icons .fas {
+  padding-right: 0.1em;
+  font-size: 1.75em;
+  vertical-align: middle;
+}
+
+.grid-with-images img {
+  width: auto;
+  max-height: 3em;
+  filter: grayscale(1);
+}
+
+.team-members img {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto;
+}
+.team-members a:not(.sd-hide-link-text)::after {
+  display: none !important;
 }
 
 section#plugins dl.field-list {

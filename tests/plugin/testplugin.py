@@ -14,11 +14,11 @@ class TestStream(Stream):
     __shortname__ = "test"
 
     def open(self):
-        return BytesIO(b'x' * 8192 * 2)
+        return BytesIO(b"x" * 8192 * 2)
 
 
 @pluginmatcher(re.compile(
-    r"https?://test\.se"
+    r"https?://test\.se",
 ))
 @pluginargument(
     "bool",
@@ -31,7 +31,7 @@ class TestStream(Stream):
 )
 class TestPlugin(Plugin):
     options = Options({
-        "a_option": "default"
+        "a_option": "default",
     })
 
     id = "test-id-1234-5678"
@@ -45,13 +45,13 @@ class TestPlugin(Plugin):
 
         if "UnsortableStreamNames" in self.url:
             def gen():
-                for i in range(3):
+                for _ in range(3):
                     yield "vod", HTTPStream(self.session, "http://test.se/stream")
 
             return gen()
 
         if "NoStreamsError" in self.url:
-            raise NoStreamsError(self.url)
+            raise NoStreamsError
 
         streams = {}
         streams["test"] = TestStream(self.session)
@@ -69,7 +69,7 @@ class TestPlugin(Plugin):
 
         streams["480p"] = [
             HTTPStream(self.session, "http://test.se/stream"),
-            HLSStream(self.session, "http://test.se/playlist.m3u8")
+            HLSStream(self.session, "http://test.se/playlist.m3u8"),
         ]
 
         return streams

@@ -26,6 +26,7 @@ extensions = [
     'ext_plugins',
     'ext_releaseref',
     'myst_parser',
+    'sphinx_design',
 ]
 
 autosectionlabel_prefix_document = True
@@ -41,7 +42,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Streamlink'
-copyright = '2022, Streamlink'
+copyright = '2023, Streamlink'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -125,6 +126,8 @@ html_theme_options = {
     "source_repository": "https://github.com/streamlink/streamlink/",
     "source_branch": "master",
     "source_directory": "docs/",
+    "light_logo": "icon.svg",
+    "dark_logo": "icon.svg",
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -159,10 +162,10 @@ html_logo = "../icon.svg"
 html_static_path = ['_static']
 
 html_css_files = [
-    'styles/custom.css',
-    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/fontawesome.min.css',
-    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/solid.min.css',
-    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/brands.min.css',
+    "styles/custom.css",
+    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/fontawesome.min.css",
+    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/solid.min.css",
+    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/brands.min.css",
 ]
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
@@ -216,10 +219,22 @@ htmlhelp_basename = 'streamlinkdoc'
 
 # -- Options for manual page output --------------------------------------------
 
+# Only include the man page in builds with the "man" tag set: via `-t man` (see Makefile)
+
+# noinspection PyUnresolvedReferences
+if not tags.tags.get("man"):  # type: ignore[name-defined]
+    exclude_patterns.append("_man.rst")
+
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('_man', 'streamlink', 'extracts streams from various services and pipes them into a video player of choice', ['Streamlink Contributors'], 1)
+    (
+        "_man",
+        "streamlink",
+        "extracts streams from various services and pipes them into a video player of choice",
+        ["Streamlink Contributors"],
+        1,
+    ),
 ]
 
 # If true, show URL addresses after external links.
