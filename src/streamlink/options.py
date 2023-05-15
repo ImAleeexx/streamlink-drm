@@ -1,44 +1,91 @@
-from typing import Iterator, Optional, Sequence, Union
+import warnings
+from typing import Any, Callable, ClassVar, Dict, Iterator, Mapping, Optional, Sequence, Union
 
-
-def _normalise_option_name(name):
-    return name.replace('-', '_')
-
-
-def _normalise_argument_name(name):
-    return name.replace('_', '-').strip("-")
+from streamlink.exceptions import StreamlinkDeprecationWarning
 
 
 class Options:
     """
-    For storing options to be used by plugins, with default values.
+    For storing options to be used by the Streamlink session and plugins, with default values.
 
-    Note: Option names are normalised by replacing "-" with "_". This means that the keys
-    ``example-one`` and ``example_one`` are equivalent.
+    Note: Option names are normalized by replacing "_" with "-".
+          This means that the keys ``example_one`` and ``example-one`` are equivalent.
     """
 
-    def __init__(self, defaults=None):
+    _MAP_GETTERS: ClassVar[Mapping[str, Callable[[Any, str], Any]]] = {}
+    _MAP_SETTERS: ClassVar[Mapping[str, Callable[[Any, str, Any], None]]] = {}
+
+    def __init__(self, defaults: Optional[Mapping[str, Any]] = None):
         if not defaults:
             defaults = {}
 
-        self.defaults = self._normalise_dict(defaults)
+        self.defaults = self._normalize_dict(defaults)
         self.options = self.defaults.copy()
 
+    @staticmethod
+    def _normalize_key(name: str) -> str:
+        return name.replace("_", "-")
+
     @classmethod
-    def _normalise_dict(cls, src):
-        return {_normalise_option_name(key): value for key, value in src.items()}
+    def _normalize_dict(cls, src: Mapping[str, Any]) -> Dict[str, Any]:
+        normalize_key = cls._normalize_key
+        return {normalize_key(key): value for key, value in src.items()}
 
-    def set(self, key, value):
-        self.options[_normalise_option_name(key)] = value
+    def clear(self) -> None:
+        self.options.clear()
+        self.options.update(self.defaults.copy())
 
-    def get(self, key):
-        key = _normalise_option_name(key)
-        if key in self.options:
-            return self.options[key]
+    def get(self, key: str) -> Any:
+        normalized = self._normalize_key(key)
+        method = self._MAP_GETTERS.get(normalized)
+        if method is not None:
+            return method(self, normalized)
+        else:
+            return self.options.get(normalized)
 
-    def update(self, options):
+    def get_explicit(self, key: str) -> Any:
+        normalized = self._normalize_key(key)
+        return self.options.get(normalized)
+
+    def set(self, key: str, value: Any) -> None:
+        normalized = self._normalize_key(key)
+        method = self._MAP_SETTERS.get(normalized)
+        if method is not None:
+            method(self, normalized, value)
+        else:
+            self.options[normalized] = value
+
+    def set_explicit(self, key: str, value: Any) -> None:
+        normalized = self._normalize_key(key)
+        self.options[normalized] = value
+
+    def update(self, options: Mapping[str, Any]) -> None:
         for key, value in options.items():
             self.set(key, value)
+
+    def keys(self):
+        return self.options.keys()
+
+    def values(self):
+        return self.options.values()
+
+    def items(self):
+        return self.options.items()
+
+    def __getitem__(self, item):
+        return self.get(item)
+
+    def __setitem__(self, item, value):
+        return self.set(item, value)
+
+    def __contains__(self, item):
+        return self.options.__contains__(item)
+
+    def __len__(self):
+        return self.options.__len__()
+
+    def __iter__(self):
+        return self.options.__iter__()
 
 
 class Argument:
@@ -60,7 +107,7 @@ class Argument:
         argument_name: Optional[str] = None,
         dest: Optional[str] = None,
         is_global: bool = False,
-        **options
+        **options,
     ):
         """
         :param name: Argument name, without leading ``--`` or plugin name prefixes, e.g. ``"username"``, ``"password"``, etc.
@@ -70,34 +117,50 @@ class Argument:
         :param sensitive: Whether the argument is sensitive (passwords, etc.) and should be masked
         :param argument_name: Custom CLI argument name without plugin name prefix
         :param dest: Custom plugin option name
-        :param is_global: Whether this plugin argument refers to a global CLI argument
+        :param is_global: Whether this plugin argument refers to a global CLI argument (deprecated)
         :param options: Arguments passed to :meth:`ArgumentParser.add_argument`, excluding ``requires`` and ``dest``
         """
 
         self.required = required
         self.name = name
         self.options = options
-        self._argument_name = argument_name  # override the cli argument name
-        self._dest = dest  # override for the plugin option name
+        self._argument_name = self._normalize_name(argument_name) if argument_name else None
+        self._dest = self._normalize_dest(dest) if dest else None
         requires = requires or []
         self.requires = list(requires) if isinstance(requires, (list, tuple)) else [requires]
         self.prompt = prompt
         self.sensitive = sensitive
         self._default = options.get("default")
         self.is_global = is_global
+        if is_global:
+            warnings.warn(
+                "Defining global plugin arguments is deprecated. Use the session options instead.",
+                StreamlinkDeprecationWarning,
+                # set stacklevel to 3 because of the @pluginargument decorator
+                # which is the public interface for defining plugin arguments
+                stacklevel=3,
+            )
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return name.replace("_", "-").strip("-")
+
+    @staticmethod
+    def _normalize_dest(name: str) -> str:
+        return name.replace("-", "_")
 
     def _name(self, plugin):
-        return self._argument_name or _normalise_argument_name("{0}-{1}".format(plugin, self.name))
+        return self._argument_name or self._normalize_name(f"{plugin}-{self.name}")
 
     def argument_name(self, plugin):
         return f"--{self.name if self.is_global else self._name(plugin)}"
 
     def namespace_dest(self, plugin):
-        return _normalise_option_name(self._name(plugin))
+        return self._normalize_dest(self._name(plugin))
 
     @property
     def dest(self):
-        return self._dest or _normalise_option_name(self.name)
+        return self._dest or self._normalize_dest(self.name)
 
     @property
     def default(self):  # read-only

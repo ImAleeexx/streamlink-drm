@@ -1,8 +1,10 @@
-import datetime
 import logging
 import os
+import re
 import sys
 import unittest
+from argparse import Namespace
+from io import BytesIO
 from pathlib import Path, PosixPath, WindowsPath
 from textwrap import dedent
 from unittest.mock import Mock, call, patch
@@ -12,10 +14,10 @@ import pytest
 
 import streamlink_cli.main
 import tests.resources
-from streamlink.exceptions import PluginError, StreamError
+from streamlink.exceptions import PluginError, StreamError, StreamlinkDeprecationWarning
 from streamlink.session import Streamlink
 from streamlink.stream.stream import Stream
-from streamlink_cli.compat import DeprecatedPath, stdout
+from streamlink_cli.compat import stdout
 from streamlink_cli.main import (
     Formatter,
     NoPluginError,
@@ -26,11 +28,12 @@ from streamlink_cli.main import (
     handle_url,
     output_stream,
     resolve_stream_name,
-    setup_config_args
 )
 from streamlink_cli.output import FileOutput, PlayerOutput
-from tests import posix_only, windows_only
 from tests.plugin.testplugin import TestPlugin as _TestPlugin
+
+
+# TODO: rewrite the entire mess
 
 
 class FakePlugin(_TestPlugin):
@@ -60,19 +63,19 @@ class TestCLIMain(unittest.TestCase):
             "worst": b,
             "best": d,
             "worst-unfiltered": a,
-            "best-unfiltered": e
+            "best-unfiltered": e,
         }
 
-        self.assertEqual(resolve_stream_name(streams, "unknown"), "unknown")
-        self.assertEqual(resolve_stream_name(streams, "160p"), "160p")
-        self.assertEqual(resolve_stream_name(streams, "360p"), "360p")
-        self.assertEqual(resolve_stream_name(streams, "480p"), "480p")
-        self.assertEqual(resolve_stream_name(streams, "720p"), "720p")
-        self.assertEqual(resolve_stream_name(streams, "1080p"), "1080p")
-        self.assertEqual(resolve_stream_name(streams, "worst"), "360p")
-        self.assertEqual(resolve_stream_name(streams, "best"), "720p")
-        self.assertEqual(resolve_stream_name(streams, "worst-unfiltered"), "160p")
-        self.assertEqual(resolve_stream_name(streams, "best-unfiltered"), "1080p")
+        assert resolve_stream_name(streams, "unknown") == "unknown"
+        assert resolve_stream_name(streams, "160p") == "160p"
+        assert resolve_stream_name(streams, "360p") == "360p"
+        assert resolve_stream_name(streams, "480p") == "480p"
+        assert resolve_stream_name(streams, "720p") == "720p"
+        assert resolve_stream_name(streams, "1080p") == "1080p"
+        assert resolve_stream_name(streams, "worst") == "360p"
+        assert resolve_stream_name(streams, "best") == "720p"
+        assert resolve_stream_name(streams, "worst-unfiltered") == "160p"
+        assert resolve_stream_name(streams, "best-unfiltered") == "1080p"
 
     def test_format_valid_streams(self):
         a = Mock()
@@ -84,36 +87,30 @@ class TestCLIMain(unittest.TestCase):
             "720p": b,
             "1080p": c,
             "worst": b,
-            "best": c
+            "best": c,
         }
-        self.assertEqual(
-            format_valid_streams(_TestPlugin, streams),
-            ", ".join([
-                "audio",
-                "720p (worst)",
-                "1080p (best)"
-            ])
-        )
+        assert format_valid_streams(_TestPlugin, streams) == ", ".join([
+            "audio",
+            "720p (worst)",
+            "1080p (best)",
+        ])
 
         streams = {
             "audio": a,
             "720p": b,
             "1080p": c,
             "worst-unfiltered": b,
-            "best-unfiltered": c
+            "best-unfiltered": c,
         }
-        self.assertEqual(
-            format_valid_streams(_TestPlugin, streams),
-            ", ".join([
-                "audio",
-                "720p (worst-unfiltered)",
-                "1080p (best-unfiltered)"
-            ])
-        )
+        assert format_valid_streams(_TestPlugin, streams) == ", ".join([
+            "audio",
+            "720p (worst-unfiltered)",
+            "1080p (best-unfiltered)",
+        ])
 
 
 class TestCLIMainHandleUrl:
-    @pytest.mark.parametrize("side_effect,expected", [
+    @pytest.mark.parametrize(("side_effect", "expected"), [
         (NoPluginError("foo"), "No plugin can handle URL: fakeurl"),
         (PluginError("bar"), "bar"),
     ])
@@ -137,31 +134,31 @@ class TestCLIMainJsonAndStreamUrl(unittest.TestCase):
         plugin._streams = streams
 
         handle_stream(plugin, streams, "best")
-        self.assertEqual(console.msg.mock_calls, [])
-        self.assertEqual(console.msg_json.mock_calls, [call(
+        assert console.msg.mock_calls == []
+        assert console.msg_json.mock_calls == [call(
             stream,
             metadata=dict(
                 id="test-id-1234-5678",
                 author="Tѥst Āuƭhǿr",
                 category=None,
-                title="Test Title"
-            )
-        )])
-        self.assertEqual(console.error.mock_calls, [])
+                title="Test Title",
+            ),
+        )]
+        assert console.error.mock_calls == []
         console.msg_json.mock_calls.clear()
 
         args.json = False
         handle_stream(plugin, streams, "best")
-        self.assertEqual(console.msg.mock_calls, [call(stream.to_url())])
-        self.assertEqual(console.msg_json.mock_calls, [])
-        self.assertEqual(console.error.mock_calls, [])
+        assert console.msg.mock_calls == [call(stream.to_url())]
+        assert console.msg_json.mock_calls == []
+        assert console.error.mock_calls == []
         console.msg.mock_calls.clear()
 
         stream.to_url.side_effect = TypeError()
         handle_stream(plugin, streams, "best")
-        self.assertEqual(console.msg.mock_calls, [])
-        self.assertEqual(console.msg_json.mock_calls, [])
-        self.assertEqual(console.exit.mock_calls, [call("The stream specified cannot be translated to a URL")])
+        assert console.msg.mock_calls == []
+        assert console.msg_json.mock_calls == []
+        assert console.exit.mock_calls == [call("The stream specified cannot be translated to a URL")]
 
     @patch("streamlink_cli.main.args", json=True, stream_url=True, stream=[], default_stream=[], retry_max=0, retry_streams=0)
     @patch("streamlink_cli.main.console")
@@ -175,32 +172,32 @@ class TestCLIMainJsonAndStreamUrl(unittest.TestCase):
 
         with patch("streamlink_cli.main.streamlink", resolve_url=Mock(return_value=("fake", _FakePlugin, ""))):
             handle_url()
-            self.assertEqual(console.msg.mock_calls, [])
-            self.assertEqual(console.msg_json.mock_calls, [call(
+            assert console.msg.mock_calls == []
+            assert console.msg_json.mock_calls == [call(
                 plugin="fake",
                 metadata=dict(
                     id="test-id-1234-5678",
                     author="Tѥst Āuƭhǿr",
                     category=None,
-                    title="Test Title"
+                    title="Test Title",
                 ),
-                streams=streams
-            )])
-            self.assertEqual(console.error.mock_calls, [])
+                streams=streams,
+            )]
+            assert console.error.mock_calls == []
             console.msg_json.mock_calls.clear()
 
             args.json = False
             handle_url()
-            self.assertEqual(console.msg.mock_calls, [call(stream.to_manifest_url())])
-            self.assertEqual(console.msg_json.mock_calls, [])
-            self.assertEqual(console.error.mock_calls, [])
+            assert console.msg.mock_calls == [call(stream.to_manifest_url())]
+            assert console.msg_json.mock_calls == []
+            assert console.error.mock_calls == []
             console.msg.mock_calls.clear()
 
             stream.to_manifest_url.side_effect = TypeError()
             handle_url()
-            self.assertEqual(console.msg.mock_calls, [])
-            self.assertEqual(console.msg_json.mock_calls, [])
-            self.assertEqual(console.exit.mock_calls, [call("The stream specified cannot be translated to a URL")])
+            assert console.msg.mock_calls == []
+            assert console.msg_json.mock_calls == []
+            assert console.exit.mock_calls == [call("The stream specified cannot be translated to a URL")]
             console.exit.mock_calls.clear()
 
 
@@ -211,23 +208,23 @@ class TestCLIMainCheckFileOutput(unittest.TestCase):
             spec=Path(path),
             is_file=Mock(return_value=is_file),
             resolve=Mock(return_value=resolve),
-            __str__=Mock(return_value=path)
+            __str__=Mock(return_value=path),
         )
 
     @patch("streamlink_cli.main.log")
     def test_check_file_output(self, mock_log: Mock):
         path = self.mock_path("foo", is_file=False, resolve="/path/to/foo")
         output = check_file_output(path, False)
-        self.assertIsInstance(output, FileOutput)
-        self.assertIs(output.filename, path)
-        self.assertEqual(mock_log.info.call_args_list, [call("Writing output to\n/path/to/foo")])
-        self.assertEqual(mock_log.debug.call_args_list, [call("Checking file output")])
+        assert isinstance(output, FileOutput)
+        assert output.filename is path
+        assert mock_log.info.call_args_list == [call("Writing output to\n/path/to/foo")]
+        assert mock_log.debug.call_args_list == [call("Checking file output")]
 
     def test_check_file_output_exists_force(self):
         path = self.mock_path("foo", is_file=True)
         output = check_file_output(path, True)
-        self.assertIsInstance(output, FileOutput)
-        self.assertIs(output.filename, path)
+        assert isinstance(output, FileOutput)
+        assert output.filename is path
 
     @patch("streamlink_cli.main.console")
     @patch("streamlink_cli.main.sys")
@@ -236,9 +233,9 @@ class TestCLIMainCheckFileOutput(unittest.TestCase):
         mock_console.ask = Mock(return_value="y")
         path = self.mock_path("foo", is_file=True)
         output = check_file_output(path, False)
-        self.assertEqual(mock_console.ask.call_args_list, [call("File foo already exists! Overwrite it? [y/N] ")])
-        self.assertIsInstance(output, FileOutput)
-        self.assertIs(output.filename, path)
+        assert mock_console.ask.call_args_list == [call("File foo already exists! Overwrite it? [y/N] ")]
+        assert isinstance(output, FileOutput)
+        assert output.filename is path
 
     @patch("streamlink_cli.main.console")
     @patch("streamlink_cli.main.sys")
@@ -247,9 +244,9 @@ class TestCLIMainCheckFileOutput(unittest.TestCase):
         mock_sys.exit.side_effect = SystemExit
         mock_console.ask = Mock(return_value="N")
         path = self.mock_path("foo", is_file=True)
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             check_file_output(path, False)
-        self.assertEqual(mock_console.ask.call_args_list, [call("File foo already exists! Overwrite it? [y/N] ")])
+        assert mock_console.ask.call_args_list == [call("File foo already exists! Overwrite it? [y/N] ")]
 
     @patch("streamlink_cli.main.console")
     @patch("streamlink_cli.main.sys")
@@ -258,9 +255,9 @@ class TestCLIMainCheckFileOutput(unittest.TestCase):
         mock_sys.exit.side_effect = SystemExit
         mock_console.ask = Mock(return_value=None)
         path = self.mock_path("foo", is_file=True)
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             check_file_output(path, False)
-        self.assertEqual(mock_console.ask.call_args_list, [call("File foo already exists! Overwrite it? [y/N] ")])
+        assert mock_console.ask.call_args_list == [call("File foo already exists! Overwrite it? [y/N] ")]
 
     @patch("streamlink_cli.main.console")
     @patch("streamlink_cli.main.sys")
@@ -268,24 +265,26 @@ class TestCLIMainCheckFileOutput(unittest.TestCase):
         mock_sys.stdin.isatty.return_value = False
         mock_sys.exit.side_effect = SystemExit
         path = self.mock_path("foo", is_file=True)
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             check_file_output(path, False)
-        self.assertEqual(mock_console.ask.call_args_list, [])
+        assert mock_console.ask.call_args_list == []
 
 
+# TODO: don't use Mock() for mocking args, use a custom argparse.Namespace instead
 class TestCLIMainCreateOutput(unittest.TestCase):
     @patch("streamlink_cli.main.args")
     @patch("streamlink_cli.main.console", Mock())
     @patch("streamlink_cli.main.DEFAULT_STREAM_METADATA", {"title": "bar"})
     def test_create_output_no_file_output_options(self, args: Mock):
         formatter = Formatter({
-            "author": lambda: "foo"
+            "author": lambda: "foo",
         })
         args.output = None
         args.stdout = None
         args.record = None
         args.record_and_pipe = None
         args.player_fifo = False
+        args.player_http = False
         args.title = None
         args.url = "URL"
         args.player = "mpv"
@@ -367,7 +366,7 @@ class TestCLIMainCreateOutput(unittest.TestCase):
     @patch("streamlink_cli.main.DEFAULT_STREAM_METADATA", {"title": "bar"})
     def test_create_output_record(self, mock_check_file_output: Mock, args: Mock):
         formatter = Formatter({
-            "author": lambda: "foo"
+            "author": lambda: "foo",
         })
         mock_check_file_output.side_effect = lambda path, force: FileOutput(path)
         args.output = None
@@ -404,7 +403,7 @@ class TestCLIMainCreateOutput(unittest.TestCase):
     @patch("streamlink_cli.main.DEFAULT_STREAM_METADATA", {"title": "bar"})
     def test_create_output_record_stdout(self, args: Mock):
         formatter = Formatter({
-            "author": lambda: "foo"
+            "author": lambda: "foo",
         })
         args.output = None
         args.stdout = None
@@ -446,12 +445,9 @@ class TestCLIMainCreateOutput(unittest.TestCase):
         args.record_and_pipe = False
         args.player = None
         console.exit.side_effect = SystemExit
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             create_output(formatter)
-        self.assertRegex(
-            console.exit.call_args_list[0][0][0],
-            r"^The default player \(\w+\) does not seem to be installed\."
-        )
+        assert re.search(r"^The default player \(\w+\) does not seem to be installed\.", console.exit.call_args_list[0][0][0])
 
 
 class TestCLIMainHandleStream(unittest.TestCase):
@@ -474,120 +470,84 @@ class TestCLIMainHandleStream(unittest.TestCase):
         streams = {"best": stream}
 
         handle_stream(plugin, streams, "best")
-        self.assertEqual(mock_output_stream.call_count, 1)
+        assert mock_output_stream.call_count == 1
         paramStream, paramFormatter = mock_output_stream.call_args[0]
-        self.assertIs(paramStream, stream)
-        self.assertIsInstance(paramFormatter, Formatter)
+        assert paramStream is stream
+        assert isinstance(paramFormatter, Formatter)
 
 
-class TestCLIMainOutputStream(unittest.TestCase):
-    @patch("streamlink_cli.main.args", Mock(retry_open=2))
-    @patch("streamlink_cli.main.log")
-    @patch("streamlink_cli.main.console")
-    def test_stream_failure_no_output_open(self, mock_console: Mock, mock_log: Mock):
+class TestCLIMainOutputStream:
+    def test_stream_failure_no_output_open(self, caplog: pytest.LogCaptureFixture):
         output = Mock()
         stream = Mock(
             __str__=lambda _: "fake-stream",
-            open=Mock(side_effect=StreamError("failure"))
+            open=Mock(side_effect=StreamError("failure")),
         )
-        formatter = Formatter({})
+        formatter = Mock()
 
-        with patch("streamlink_cli.main.output", Mock()), \
+        caplog.set_level(1, "streamlink.cli")
+
+        with patch("streamlink_cli.main.args", Namespace(retry_open=2)), \
+             patch("streamlink_cli.main.console") as mock_console, \
+             patch("streamlink_cli.main.output"), \
              patch("streamlink_cli.main.create_output", return_value=output):
             output_stream(stream, formatter)
 
-        self.assertEqual(mock_log.error.call_args_list, [
-            call("Try 1/2: Could not open stream fake-stream (Could not open stream: failure)"),
-            call("Try 2/2: Could not open stream fake-stream (Could not open stream: failure)"),
-        ])
-        self.assertEqual(mock_console.exit.call_args_list, [
-            call("Could not open stream fake-stream, tried 2 times, exiting")
-        ])
-        self.assertFalse(output.open.called, "Does not open the output on stream error")
-
-
-@patch("streamlink_cli.main.log")
-class TestCLIMainSetupConfigArgs(unittest.TestCase):
-    configdir = Path(tests.resources.__path__[0], "cli", "config")
-    parser = Mock()
-
-    @classmethod
-    def subject(cls, config_files, **args):
-        def resolve_url(name):
-            if name == "noplugin":
-                raise NoPluginError()
-            return name, Mock(__module__="testplugin"), name
-
-        session = Mock()
-        session.resolve_url.side_effect = resolve_url
-        args.setdefault("url", "testplugin")
-
-        with patch("streamlink_cli.main.setup_args") as mock_setup_args, \
-             patch("streamlink_cli.main.args", **args), \
-             patch("streamlink_cli.main.streamlink", session), \
-             patch("streamlink_cli.main.CONFIG_FILES", config_files):
-            setup_config_args(cls.parser)
-            return mock_setup_args
-
-    def test_no_plugin(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "primary", DeprecatedPath(self.configdir / "secondary")],
-            config=None,
-            url="noplugin"
-        )
-        expected = [self.configdir / "primary"]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert not mock_log.warning.mock_calls
-
-    def test_default_primary(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "primary", DeprecatedPath(self.configdir / "secondary")],
-            config=None
-        )
-        expected = [self.configdir / "primary", self.configdir / "primary.testplugin"]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert not mock_log.warning.mock_calls
-
-    def test_default_secondary_deprecated(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "non-existent", DeprecatedPath(self.configdir / "secondary")],
-            config=None
-        )
-        expected = [self.configdir / "secondary", self.configdir / "secondary.testplugin"]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert mock_log.warning.mock_calls == [
-            call(f"Loaded config from deprecated path, see CLI docs for how to migrate: {expected[0]}"),
-            call(f"Loaded plugin config from deprecated path, see CLI docs for how to migrate: {expected[1]}"),
+        assert [(record.levelname, record.module, record.message) for record in caplog.records] == [
+            ("error", "main", "Try 1/2: Could not open stream fake-stream (Could not open stream: failure)"),
+            ("error", "main", "Try 2/2: Could not open stream fake-stream (Could not open stream: failure)"),
         ]
-
-    def test_custom_with_primary_plugin(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "primary", DeprecatedPath(self.configdir / "secondary")],
-            config=[str(self.configdir / "custom")]
-        )
-        expected = [self.configdir / "custom", self.configdir / "primary.testplugin"]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert not mock_log.warning.mock_calls
-
-    def test_custom_with_deprecated_plugin(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "non-existent", DeprecatedPath(self.configdir / "secondary")],
-            config=[str(self.configdir / "custom")]
-        )
-        expected = [self.configdir / "custom", DeprecatedPath(self.configdir / "secondary.testplugin")]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert mock_log.warning.mock_calls == [
-            call(f"Loaded plugin config from deprecated path, see CLI docs for how to migrate: {expected[1]}"),
+        assert mock_console.exit.call_args_list == [
+            call("Could not open stream fake-stream, tried 2 times, exiting"),
         ]
+        assert not output.open.called, "Does not open the output on stream error"
 
-    def test_custom_multiple(self, mock_log):
-        mock_setup_args = self.subject(
-            [self.configdir / "primary", DeprecatedPath(self.configdir / "secondary")],
-            config=[str(self.configdir / "non-existent"), str(self.configdir / "primary"), str(self.configdir / "secondary")]
-        )
-        expected = [self.configdir / "secondary", self.configdir / "primary", self.configdir / "primary.testplugin"]
-        mock_setup_args.assert_called_once_with(self.parser, expected, ignore_unknown=False)
-        assert not mock_log.warning.mock_calls
+    @pytest.mark.parametrize(
+        ("args", "isatty", "deprecation", "expected"),
+        [
+            ({"progress": "yes", "force_progress": False}, True, False, True),
+            ({"progress": "no", "force_progress": False}, True, False, False),
+            ({"progress": "yes", "force_progress": False}, False, False, False),
+            ({"progress": "no", "force_progress": False}, False, False, False),
+            ({"progress": "force", "force_progress": False}, False, False, True),
+            ({"progress": "yes", "force_progress": True}, False, True, True),
+            ({"progress": "no", "force_progress": True}, False, True, True),
+        ],
+    )
+    def test_show_progress(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        recwarn: pytest.WarningsRecorder,
+        args: dict,
+        isatty: bool,
+        deprecation: bool,
+        expected: bool,
+    ):
+        streamio = BytesIO(b"0" * 8192 * 2)
+        stream = Mock(open=Mock(return_value=streamio))
+        output = Mock()
+        formatter = Mock()
+
+        caplog.set_level(1, "streamlink.cli")
+
+        with patch("streamlink_cli.main.sys.stderr.isatty", return_value=isatty), \
+             patch("streamlink_cli.main.args", Namespace(retry_open=1, **args)), \
+             patch("streamlink_cli.main.console") as mock_console, \
+             patch("streamlink_cli.main.output"), \
+             patch("streamlink_cli.main.create_output", return_value=output), \
+             patch("streamlink_cli.main.StreamRunner") as mock_streamrunner:
+            assert output_stream(stream, formatter)
+
+        assert not mock_console.exit.called
+        assert [(record.levelname, record.module, record.message) for record in caplog.records] == [
+            ("debug", "main", "Pre-buffering 8192 bytes"),
+            ("debug", "main", "Writing stream to output"),
+        ]
+        assert [(record.category, str(record.message)) for record in recwarn.list] == ([(
+            StreamlinkDeprecationWarning,
+            "The --force-progress option has been deprecated in favor of --progress=force",
+        )] if deprecation else [])
+        assert mock_streamrunner.call_args_list == [call(streamio, output, show_progress=expected)]
 
 
 class _TestCLIMainLogging(unittest.TestCase):
@@ -632,9 +592,9 @@ class _TestCLIMainLogging(unittest.TestCase):
     def write_file_and_assert(self, mock_mkdir: Mock, mock_write: Mock, mock_stdout: Mock):
         streamlink_cli.main.log.info("foo")
         streamlink_cli.main.console.msg("bar")
-        self.assertEqual(mock_mkdir.mock_calls, [call(parents=True, exist_ok=True)])
-        self.assertEqual(mock_write.mock_calls, self._write_calls)
-        self.assertFalse(mock_stdout.write.called)
+        assert mock_mkdir.mock_calls == [call(parents=True, exist_ok=True)]
+        assert mock_write.mock_calls == self._write_calls
+        assert not mock_stdout.write.called
 
 
 class TestCLIMainLoggingStreams(_TestCLIMainLogging):
@@ -649,14 +609,14 @@ class TestCLIMainLoggingStreams(_TestCLIMainLogging):
         super().subject(argv)
         childlogger = logging.getLogger("streamlink.test_cli_main")
 
-        with self.assertRaises(SystemExit):
-            streamlink_cli.main.log.info("foo")
-            childlogger.error("baz")
+        streamlink_cli.main.log.info("foo")
+        childlogger.error("baz")
+        with pytest.raises(SystemExit):
             streamlink_cli.main.console.exit("bar")
 
-        self.assertIs(streamlink_cli.main.log.parent.handlers[0].stream, stream)
-        self.assertIs(childlogger.parent.handlers[0].stream, stream)
-        self.assertIs(streamlink_cli.main.console.output, stream)
+        assert streamlink_cli.main.log.parent.handlers[0].stream is stream
+        assert childlogger.parent.handlers[0].stream is stream
+        assert streamlink_cli.main.console.output is stream
 
     @patch("sys.stderr")
     @patch("sys.stdout")
@@ -692,39 +652,45 @@ class TestCLIMainLoggingStreams(_TestCLIMainLogging):
     @patch("sys.stdout")
     def test_no_pipe_no_json(self, mock_stdout: Mock, mock_stderr: Mock):
         self.subject(["streamlink"], mock_stdout)
-        self.assertEqual(mock_stdout.write.mock_calls,
-                         self._write_call_log_cli_info + self._write_call_log_testcli_err + self._write_call_console_msg_error)
-        self.assertEqual(mock_stderr.write.mock_calls, [])
+        assert mock_stdout.write.mock_calls == (
+            self._write_call_log_cli_info
+            + self._write_call_log_testcli_err
+            + self._write_call_console_msg_error
+        )
+        assert mock_stderr.write.mock_calls == []
 
     @patch("sys.stderr")
     @patch("sys.stdout")
     def test_no_pipe_json(self, mock_stdout: Mock, mock_stderr: Mock):
         self.subject(["streamlink", "--json"], mock_stdout)
-        self.assertEqual(mock_stdout.write.mock_calls, self._write_call_console_msg_json)
-        self.assertEqual(mock_stderr.write.mock_calls, [])
+        assert mock_stdout.write.mock_calls == self._write_call_console_msg_json
+        assert mock_stderr.write.mock_calls == []
 
     @patch("sys.stderr")
     @patch("sys.stdout")
     def test_pipe_no_json(self, mock_stdout: Mock, mock_stderr: Mock):
         self.subject(["streamlink", "--stdout"], mock_stderr)
-        self.assertEqual(mock_stdout.write.mock_calls, [])
-        self.assertEqual(mock_stderr.write.mock_calls,
-                         self._write_call_log_cli_info + self._write_call_log_testcli_err + self._write_call_console_msg_error)
+        assert mock_stdout.write.mock_calls == []
+        assert mock_stderr.write.mock_calls == (
+            self._write_call_log_cli_info
+            + self._write_call_log_testcli_err
+            + self._write_call_console_msg_error
+        )
 
     @patch("sys.stderr")
     @patch("sys.stdout")
     def test_pipe_json(self, mock_stdout: Mock, mock_stderr: Mock):
         self.subject(["streamlink", "--stdout", "--json"], mock_stderr)
-        self.assertEqual(mock_stdout.write.mock_calls, [])
-        self.assertEqual(mock_stderr.write.mock_calls, self._write_call_console_msg_json)
+        assert mock_stdout.write.mock_calls == []
+        assert mock_stderr.write.mock_calls == self._write_call_console_msg_json
 
 
 class TestCLIMainLoggingInfos(_TestCLIMainLogging):
-    @posix_only
+    @pytest.mark.posix_only()
     @patch("streamlink_cli.main.log")
     def test_log_root_warning(self, mock_log):
         self.subject(["streamlink"], euid=0)
-        self.assertEqual(mock_log.info.mock_calls, [call("streamlink is running as root! Be careful!")])
+        assert mock_log.info.mock_calls == [call("streamlink is running as root! Be careful!")]
 
     @patch("streamlink_cli.main.log")
     @patch("streamlink_cli.main.streamlink_version", "streamlink")
@@ -747,7 +713,7 @@ class TestCLIMainLoggingInfos(_TestCLIMainLogging):
         mock_importlib_metadata.version.side_effect = version
 
         self.subject(["streamlink", "--loglevel", "info"])
-        self.assertEqual(mock_log.debug.mock_calls, [], "Doesn't log anything if not debug logging")
+        assert mock_log.debug.mock_calls == [], "Doesn't log anything if not debug logging"
 
         with patch("sys.platform", "linux"), \
              patch("platform.platform", Mock(return_value="linux")):
@@ -799,9 +765,9 @@ class TestCLIMainLoggingInfos(_TestCLIMainLogging):
     def test_log_current_arguments(self, mock_log):
         self.subject([
             "streamlink",
-            "--loglevel", "info"
+            "--loglevel", "info",
         ])
-        self.assertEqual(mock_log.debug.mock_calls, [], "Doesn't log anything if not debug logging")
+        assert mock_log.debug.mock_calls == [], "Doesn't log anything if not debug logging"
 
         self.subject([
             "streamlink",
@@ -810,20 +776,17 @@ class TestCLIMainLoggingInfos(_TestCLIMainLogging):
             "--testplugin-bool",
             "--testplugin-password=secret",
             "test.se/channel",
-            "best,worst"
+            "best,worst",
         ])
-        self.assertEqual(
-            mock_log.debug.mock_calls[-7:],
-            [
-                call("Arguments:"),
-                call(" url=test.se/channel"),
-                call(" stream=['best', 'worst']"),
-                call(" --loglevel=debug"),
-                call(" --player=custom"),
-                call(" --testplugin-bool=True"),
-                call(" --testplugin-password=********")
-            ]
-        )
+        assert mock_log.debug.mock_calls[-7:] == [
+            call("Arguments:"),
+            call(" url=test.se/channel"),
+            call(" stream=['best', 'worst']"),
+            call(" --loglevel=debug"),
+            call(" --player=custom"),
+            call(" --testplugin-bool=True"),
+            call(" --testplugin-password=********"),
+        ]
 
 
 class TestCLIMainLoggingLogfile(_TestCLIMainLogging):
@@ -833,9 +796,9 @@ class TestCLIMainLoggingLogfile(_TestCLIMainLogging):
         self.subject(["streamlink"])
         streamlink_cli.main.log.info("foo")
         streamlink_cli.main.console.msg("bar")
-        self.assertEqual(streamlink_cli.main.console.output, sys.stdout)
-        self.assertFalse(mock_open.called)
-        self.assertEqual(mock_stdout.write.mock_calls, self._write_calls)
+        assert streamlink_cli.main.console.output == sys.stdout
+        assert not mock_open.called
+        assert mock_stdout.write.mock_calls == self._write_calls
 
     @patch("sys.stdout")
     @patch("builtins.open")
@@ -843,9 +806,9 @@ class TestCLIMainLoggingLogfile(_TestCLIMainLogging):
         self.subject(["streamlink", "--loglevel", "none", "--logfile", "foo"])
         streamlink_cli.main.log.info("foo")
         streamlink_cli.main.console.msg("bar")
-        self.assertEqual(streamlink_cli.main.console.output, sys.stdout)
-        self.assertFalse(mock_open.called)
-        self.assertEqual(mock_stdout.write.mock_calls, [call("bar\n")])
+        assert streamlink_cli.main.console.output == sys.stdout
+        assert not mock_open.called
+        assert mock_stdout.write.mock_calls == [call("bar\n")]
 
     @patch("sys.stdout")
     @patch("builtins.open")
@@ -856,11 +819,11 @@ class TestCLIMainLoggingLogfile(_TestCLIMainLogging):
         self.write_file_and_assert(
             mock_mkdir=path.mkdir,
             mock_write=mock_open(str(path), "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
 
-@posix_only
+@pytest.mark.posix_only()
 class TestCLIMainLoggingLogfilePosix(_TestCLIMainLogging):
     @patch("sys.stdout")
     @patch("builtins.open")
@@ -870,7 +833,7 @@ class TestCLIMainLoggingLogfilePosix(_TestCLIMainLogging):
         self.write_file_and_assert(
             mock_mkdir=PosixPath("/foo").mkdir,
             mock_write=mock_open("/foo/bar", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
     @patch("sys.stdout")
@@ -882,24 +845,24 @@ class TestCLIMainLoggingLogfilePosix(_TestCLIMainLogging):
         self.write_file_and_assert(
             mock_mkdir=PosixPath("/foo").mkdir,
             mock_write=mock_open("/foo/bar", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
     @patch("sys.stdout")
     @patch("builtins.open")
     @patch("pathlib.Path.mkdir", Mock())
-    @freezegun.freeze_time(datetime.datetime(2000, 1, 2, 3, 4, 5))
+    @freezegun.freeze_time("2000-01-02T03:04:05Z")
     def test_logfile_path_auto(self, mock_open, mock_stdout):
         with patch("streamlink_cli.constants.LOG_DIR", PosixPath("/foo")):
             self.subject(["streamlink", "--logfile", "-"])
         self.write_file_and_assert(
             mock_mkdir=PosixPath("/foo").mkdir,
             mock_write=mock_open("/foo/2000-01-02_03-04-05.log", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
 
-@windows_only
+@pytest.mark.windows_only()
 class TestCLIMainLoggingLogfileWindows(_TestCLIMainLogging):
     @patch("sys.stdout")
     @patch("builtins.open")
@@ -909,7 +872,7 @@ class TestCLIMainLoggingLogfileWindows(_TestCLIMainLogging):
         self.write_file_and_assert(
             mock_mkdir=WindowsPath("C:\\foo").mkdir,
             mock_write=mock_open("C:\\foo\\bar", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
     @patch("sys.stdout")
@@ -921,20 +884,20 @@ class TestCLIMainLoggingLogfileWindows(_TestCLIMainLogging):
         self.write_file_and_assert(
             mock_mkdir=WindowsPath("C:\\foo").mkdir,
             mock_write=mock_open("C:\\foo\\bar", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
     @patch("sys.stdout")
     @patch("builtins.open")
     @patch("pathlib.Path.mkdir", Mock())
-    @freezegun.freeze_time(datetime.datetime(2000, 1, 2, 3, 4, 5))
+    @freezegun.freeze_time("2000-01-02T03:04:05Z")
     def test_logfile_path_auto(self, mock_open, mock_stdout):
         with patch("streamlink_cli.constants.LOG_DIR", WindowsPath("C:\\foo")):
             self.subject(["streamlink", "--logfile", "-"])
         self.write_file_and_assert(
             mock_mkdir=WindowsPath("C:\\foo").mkdir,
             mock_write=mock_open("C:\\foo\\2000-01-02_03-04-05.log", "a").write,
-            mock_stdout=mock_stdout
+            mock_stdout=mock_stdout,
         )
 
 
@@ -951,11 +914,14 @@ class TestCLIMainPrint(unittest.TestCase):
                  patch("streamlink_cli.main.setup_streamlink"), \
                  patch("streamlink_cli.main.setup_plugins"), \
                  patch("streamlink_cli.main.setup_signals"):
-                with self.assertRaises(SystemExit) as cm:
+                with pytest.raises(SystemExit) as cm:
                     streamlink_cli.main.main()
-                self.assertEqual(cm.exception.code, 0)
+                assert cm.value.code == 0
                 mock_resolve_url.assert_not_called()
                 mock_resolve_url_no_redirect.assert_not_called()
+
+    def tearDown(self):
+        streamlink_cli.main.logger.root.handlers.clear()
 
     @staticmethod
     def get_stdout(mock_stdout):
@@ -965,47 +931,38 @@ class TestCLIMainPrint(unittest.TestCase):
     @patch("sys.argv", ["streamlink"])
     def test_print_usage(self, mock_stdout):
         self.subject()
-        self.assertEqual(
-            self.get_stdout(mock_stdout),
-            "usage: streamlink [OPTIONS] <URL> [STREAM]\n\n"
-            + "Use -h/--help to see the available options or read the manual at https://streamlink.github.io\n"
-        )
+        assert self.get_stdout(mock_stdout) == dedent("""
+            usage: streamlink [OPTIONS] <URL> [STREAM]
+
+            Use -h/--help to see the available options or read the manual at https://streamlink.github.io
+        """).lstrip()
 
     @patch("sys.stdout")
     @patch("sys.argv", ["streamlink", "--help"])
     def test_print_help(self, mock_stdout):
         self.subject()
         output = self.get_stdout(mock_stdout)
-        self.assertIn(
-            "usage: streamlink [OPTIONS] <URL> [STREAM]",
-            output
-        )
-        self.assertIn(
-            dedent("""
-                Streamlink is a command-line utility that extracts streams from various
-                services and pipes them into a video player of choice.
-            """),
-            output
-        )
-        self.assertIn(
-            dedent("""
-                For more in-depth documentation see:
-                  https://streamlink.github.io
+        assert "usage: streamlink [OPTIONS] <URL> [STREAM]" in output
+        assert dedent("""
+            Streamlink is a command-line utility that extracts streams from various
+            services and pipes them into a video player of choice.
+        """) in output
+        assert dedent("""
+            For more in-depth documentation see:
+              https://streamlink.github.io
 
-                Please report broken plugins or bugs to the issue tracker on Github:
-                  https://github.com/streamlink/streamlink/issues
-            """),
-            output
-        )
+            Please report broken plugins or bugs to the issue tracker on Github:
+              https://github.com/streamlink/streamlink/issues
+        """) in output
 
     @patch("sys.stdout")
     @patch("sys.argv", ["streamlink", "--plugins"])
     def test_print_plugins(self, mock_stdout):
         self.subject()
-        self.assertEqual(self.get_stdout(mock_stdout), "Loaded plugins: testplugin\n")
+        assert self.get_stdout(mock_stdout) == "Loaded plugins: testplugin\n"
 
     @patch("sys.stdout")
     @patch("sys.argv", ["streamlink", "--plugins", "--json"])
     def test_print_plugins_json(self, mock_stdout):
         self.subject()
-        self.assertEqual(self.get_stdout(mock_stdout), """[\n  "testplugin"\n]\n""")
+        assert self.get_stdout(mock_stdout) == '[\n  "testplugin"\n]\n'

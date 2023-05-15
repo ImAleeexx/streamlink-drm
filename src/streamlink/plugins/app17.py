@@ -12,11 +12,12 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://17\.live/.+/live/(?P<channel>[^/&?]+)"
+    r"https?://17\.live/.+/live/(?P<channel>[^/&?]+)",
 ))
 class App17(Plugin):
     def _get_streams(self):

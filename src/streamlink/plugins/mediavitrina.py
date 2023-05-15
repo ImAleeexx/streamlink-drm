@@ -14,6 +14,7 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import update_qsd
 
+
 log = logging.getLogger(__name__)
 
 
@@ -45,10 +46,10 @@ class MediaVitrina(Plugin):
                         [dict],
                         validate.filter(lambda n: n.get("type") == "on-air"),
                         [{"onAirLink": validate.url(netloc="player.mediavitrina.ru")}],
-                        validate.get((0, "onAirLink"))
+                        validate.get((0, "onAirLink")),
                     )},
-                    validate.get("content")
-                )
+                    validate.get("content"),
+                ),
             )
         else:
             # https://chetv.ru/online/

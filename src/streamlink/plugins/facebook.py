@@ -14,6 +14,7 @@ from streamlink.stream.dash import DASHStream
 from streamlink.stream.http import HTTPStream
 from streamlink.utils.parse import parse_json
 
+
 log = logging.getLogger(__name__)
 
 
@@ -23,13 +24,13 @@ log = logging.getLogger(__name__)
     /[^/]+/(?:posts|videos)/(?P<video_id>\d+)
 """, re.VERBOSE))
 class Facebook(Plugin):
-    _src_re = re.compile(r'''(sd|hd)_src["']?\s*:\s*(?P<quote>["'])(?P<url>.+?)(?P=quote)''')
-    _dash_manifest_re = re.compile(r'''dash_manifest["']?\s*:\s*["'](?P<manifest>.+?)["'],''')
-    _playlist_re = re.compile(r'''video:\[({url:".+?}\])''')
+    _src_re = re.compile(r"""(sd|hd)_src["']?\s*:\s*(?P<quote>["'])(?P<url>.+?)(?P=quote)""")
+    _dash_manifest_re = re.compile(r"""dash_manifest["']?\s*:\s*["'](?P<manifest>.+?)["'],""")
+    _playlist_re = re.compile(r"""video:\[({url:".+?}\])""")
     _plurl_re = re.compile(r'''url:"(.*?)"''')
-    _pc_re = re.compile(r'''pkg_cohort["']\s*:\s*["'](.+?)["']''')
-    _rev_re = re.compile(r'''client_revision["']\s*:\s*(\d+),''')
-    _dtsg_re = re.compile(r'''DTSGInitialData["'],\s*\[\],\s*{\s*["']token["']\s*:\s*["'](.+?)["']''')
+    _pc_re = re.compile(r"""pkg_cohort["']\s*:\s*["'](.+?)["']""")
+    _rev_re = re.compile(r"""client_revision["']\s*:\s*(\d+),""")
+    _dtsg_re = re.compile(r"""DTSGInitialData["'],\s*\[\],\s*{\s*["']token["']\s*:\s*["'](.+?)["']""")
     _DEFAULT_PC = "PHASED:DEFAULT"
     _DEFAULT_REV = 4681796
     _TAHOE_URL = "https://www.facebook.com/video/tahoe/async/{0}/?chain=true&isvideo=true&payloadtype=primary"
@@ -37,7 +38,7 @@ class Facebook(Plugin):
     def _parse_streams(self, res):
         stream_url = validate.Schema(
             validate.parse_html(),
-            validate.xml_xpath_string(".//head/meta[@property='og:video:url'][@content][1]/@content")
+            validate.xml_xpath_string(".//head/meta[@property='og:video:url'][@content][1]/@content"),
         ).validate(res.text)
         if not stream_url:
             log.debug("No meta og:video:url")
@@ -85,7 +86,7 @@ class Facebook(Plugin):
                 validate.xml_xpath_string(".//head/title[1]/text()"),
                 validate.xml_xpath_string(".//head/meta[@res='canonical'][@href][1]/@href"),
                 validate.xml_xpath_string(".//head/meta[@property='og:title'][@content][1]/@content"),
-            ))
+            )),
         ).validate(res.text)
         if canonical == "https://www.facebook.com/login/" or "log in" in title.lower():
             log.error("This URL requires a login or may be accessible from a different IP address.")
@@ -130,7 +131,7 @@ class Facebook(Plugin):
         res = self.session.http.post(
             url,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data=urlencode(data).encode("ascii")
+            data=urlencode(data).encode("ascii"),
         )
 
         yield from self._parse_streams(res)

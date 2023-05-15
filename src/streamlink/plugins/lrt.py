@@ -10,11 +10,12 @@ import re
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?lrt\.lt/mediateka/tiesiogiai/"
+    r"https?://(?:www\.)?lrt\.lt/mediateka/tiesiogiai/",
 ))
 class LRT(Plugin):
     _video_id_re = re.compile(r"""var\svideo_id\s*=\s*["'](?P<video_id>\w+)["']""")

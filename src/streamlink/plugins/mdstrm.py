@@ -14,17 +14,18 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https://(?:www\.)?latina\.pe/tvenvivo"
+    r"https://(?:www\.)?latina\.pe/tvenvivo",
 ))
 @pluginmatcher(re.compile(
-    r"https://saltillo\.multimedios\.com/video"
+    r"https://saltillo\.multimedios\.com/video",
 ))
 @pluginmatcher(re.compile(
-    r"https://mdstrm\.com/live-stream/\w+"
+    r"https://mdstrm\.com/live-stream/\w+",
 ))
 class MDStrm(Plugin):
     @staticmethod

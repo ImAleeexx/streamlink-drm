@@ -5,7 +5,7 @@ import pytest
 from streamlink.utils.url import absolute_url, prepend_www, update_qsd, update_scheme, url_concat, url_equal
 
 
-@pytest.mark.parametrize("baseurl,url,expected", [
+@pytest.mark.parametrize(("baseurl", "url", "expected"), [
     ("http://test.se", "/test", "http://test.se/test"),
     ("http://test.se", "http/test.se/test", "http://test.se/http/test.se/test"),
     ("http://test.se", "http://test2.se/test", "http://test2.se/test"),
@@ -14,7 +14,7 @@ def test_absolute_url(baseurl, url, expected):
     assert expected == absolute_url(baseurl, url)
 
 
-@pytest.mark.parametrize("url,expected", [
+@pytest.mark.parametrize(("url", "expected"), [
     ("http://test.se/test", "http://www.test.se/test"),
     ("http://www.test.se", "http://www.test.se"),
 ])
@@ -22,7 +22,7 @@ def test_prepend_www(url, expected):
     assert expected == prepend_www(url)
 
 
-@pytest.mark.parametrize("assertion,args,expected", [
+@pytest.mark.parametrize(("assertion", "args", "expected"), [
     ("current scheme overrides target scheme (https)",
      ("https://other.com/bar", "http://example.com/foo"),
      "https://example.com/foo"),
@@ -85,13 +85,13 @@ def test_update_qsd():
     assert update_qsd("http://test.se?one=1&two=3", {"two": 2}) == "http://test.se?one=1&two=2"
     assert update_qsd("http://test.se?one=1&two=3", remove=["two"]) == "http://test.se?one=1"
     assert update_qsd("http://test.se?one=1&two=3", {"one": None}, remove="*") == "http://test.se?one=1"
-    assert update_qsd("http://test.se", dict([("one", ""), ("two", "")])) == "http://test.se?one=&two=", \
+    assert update_qsd("http://test.se", {"one": "", "two": ""}) == "http://test.se?one=&two=", \
         "should add empty params"
     assert update_qsd("http://test.se?one=", {"one": None}) == "http://test.se?one=", "should leave empty params unchanged"
     assert update_qsd("http://test.se?one=", keep_blank_values=False) == "http://test.se", "should strip blank params"
     assert update_qsd("http://test.se?one=&two=", {"one": None}, keep_blank_values=False) == "http://test.se?one=", \
         "should leave one"
-    assert update_qsd("http://test.se?&two=", {"one": ''}, keep_blank_values=False) == "http://test.se?one=", \
+    assert update_qsd("http://test.se?&two=", {"one": ""}, keep_blank_values=False) == "http://test.se?one=", \
         "should set one blank"
     assert update_qsd("http://test.se?one=", {"two": 2}) == "http://test.se?one=&two=2"
 

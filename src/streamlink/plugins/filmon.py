@@ -18,6 +18,7 @@ from streamlink.plugin.api.http_session import TLSSecLevel1Adapter
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 _StreamData = Tuple[str, str, int]
@@ -103,7 +104,7 @@ class FilmOnAPI:
             "url": validate.url(),
             "watch-timeout": int,
         },
-        validate.union_get("quality", "url", "watch-timeout")
+        validate.union_get("quality", "url", "watch-timeout"),
     )
 
     def __init__(self, session):
@@ -167,7 +168,7 @@ class FilmOnAPI:
 class Filmon(Plugin):
     quality_weights = {
         "high": 720,
-        "low": 480
+        "low": 480,
     }
 
     TIME_CHANNEL = 60 * 60 * 24 * 365
@@ -203,7 +204,7 @@ class Filmon(Plugin):
         self.session.http.get(self.url)
 
         if vod_id:
-            for quality, url, timeout in self.api.vod(vod_id):
+            for quality, url, _timeout in self.api.vod(vod_id):
                 if url.endswith(".m3u8"):
                     streams = HLSStream.parse_variant_playlist(self.session, url)
                     if streams:
@@ -233,7 +234,7 @@ class Filmon(Plugin):
                 raise PluginError(f"Unable to find channel ID: {channel}")
 
             try:
-                for quality, url, timeout in self.api.channel(_id):
+                for quality, url, _timeout in self.api.channel(_id):
                     yield quality, FilmOnHLS(self.session, url, self.api, channel=_id, quality=quality)
             except Exception:
                 if channel and not channel.isdigit():

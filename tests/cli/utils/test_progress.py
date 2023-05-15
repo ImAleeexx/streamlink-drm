@@ -7,7 +7,6 @@ import freezegun
 import pytest
 
 from streamlink_cli.utils.progress import Progress, ProgressFormatter
-from tests import posix_only, windows_only
 
 
 class TestProgressFormatter:
@@ -20,7 +19,7 @@ class TestProgressFormatter:
             path=lambda *_: "PATH",
         )
 
-    @pytest.mark.parametrize("term_width,expected", [
+    @pytest.mark.parametrize(("term_width", "expected"), [
         (99, "[download] Written WRITTEN to PATH (ELAPSED @ SPEED)"),
         (63, "[download] Written WRITTEN to PATH (ELAPSED @ SPEED)"),
         (62, "[download] Written WRITTEN (ELAPSED @ SPEED)"),
@@ -36,7 +35,7 @@ class TestProgressFormatter:
         with patch("streamlink_cli.utils.progress.ProgressFormatter.term_width", lambda: term_width):
             assert ProgressFormatter.format(ProgressFormatter.FORMATS, params) == expected
 
-    @pytest.mark.parametrize("term_width,expected", [
+    @pytest.mark.parametrize(("term_width", "expected"), [
         (99, "[download] Written WRITTEN to PATH (ELAPSED)"),
         (55, "[download] Written WRITTEN to PATH (ELAPSED)"),
         (54, "[download] Written WRITTEN (ELAPSED)"),
@@ -60,7 +59,7 @@ class TestProgressFormatter:
             params["path"] = Mock(side_effect=ValueError("fail"))
             assert ProgressFormatter.format(ProgressFormatter.FORMATS, params) == "[download] Written WRITTEN (ELAPSED @ SPEED)"
 
-    @pytest.mark.parametrize("size,expected", [
+    @pytest.mark.parametrize(("size", "expected"), [
         (0, "0 bytes"),
         (2**10 - 1, "1023 bytes"),
         (2**10, "1.00 KiB"),
@@ -78,7 +77,7 @@ class TestProgressFormatter:
         assert ProgressFormatter.format_filesize(float(size)) == expected
         assert ProgressFormatter.format_filesize(size, "/s") == f"{expected}/s"
 
-    @pytest.mark.parametrize("elapsed,expected", [
+    @pytest.mark.parametrize(("elapsed", "expected"), [
         (-1, "0s"),
         (0, "0s"),
         (9, "9s"),
@@ -102,10 +101,11 @@ class TestProgressFormatter:
         assert ProgressFormatter.format_time(elapsed) == expected
 
     _path_posix = PurePosixPath("/foobar/baz/some file name")
-    _path_windows = PureWindowsPath("C:\\foobar\\baz\\some file name")
+    _path_windows_abs = PureWindowsPath("C:\\foobar\\baz\\some file name")
+    _path_windows_rel = PureWindowsPath("foobar\\baz\\some file name")
     _path_windows_unc = PureWindowsPath("\\\\?\\foobar\\baz\\some file name")
 
-    @pytest.mark.parametrize("path,max_width,expected", [
+    @pytest.mark.parametrize(("path", "max_width", "expected"), [
         pytest.param(_path_posix, 26, "/foobar/baz/some file name", id="posix - full path"),
         pytest.param(_path_posix, 25, "…oobar/baz/some file name", id="posix - truncated by 1"),
         pytest.param(_path_posix, 24, "…obar/baz/some file name", id="posix - truncated by 2"),
@@ -117,17 +117,27 @@ class TestProgressFormatter:
         pytest.param(_path_posix, 16, "…/some file name", id="posix - truncated (all parts except name)"),
         pytest.param(_path_posix, 15, "…some file name", id="posix - truncated (name without separator)"),
         pytest.param(_path_posix, 14, "…ome file name", id="posix - truncated name"),
-        pytest.param(_path_windows, 28, "C:\\foobar\\baz\\some file name", id="windows - full path"),
-        pytest.param(_path_windows, 27, "C:…oobar\\baz\\some file name", id="windows - truncated by 1"),
-        pytest.param(_path_windows, 26, "C:…obar\\baz\\some file name", id="windows - truncated by 2"),
-        pytest.param(_path_windows, 25, "C:…bar\\baz\\some file name", id="windows - truncated by 3"),
-        pytest.param(_path_windows, 24, "C:…ar\\baz\\some file name", id="windows - truncated by 4"),
-        pytest.param(_path_windows, 23, "C:…r\\baz\\some file name", id="windows - truncated by 5"),
-        pytest.param(_path_windows, 22, "C:…\\baz\\some file name", id="windows - truncated by 6"),
-        pytest.param(_path_windows, 21, "C:…baz\\some file name", id="windows - truncated by 7 (cuts off separator)"),
-        pytest.param(_path_windows, 18, "C:…\\some file name", id="windows - truncated (all parts except name)"),
-        pytest.param(_path_windows, 17, "C:…some file name", id="windows - truncated (name without separator)"),
-        pytest.param(_path_windows, 16, "C:…ome file name", id="windows - truncated name"),
+        pytest.param(_path_windows_abs, 28, "C:\\foobar\\baz\\some file name", id="windows abs - full path"),
+        pytest.param(_path_windows_abs, 27, "C:…oobar\\baz\\some file name", id="windows abs - truncated by 1"),
+        pytest.param(_path_windows_abs, 26, "C:…obar\\baz\\some file name", id="windows abs - truncated by 2"),
+        pytest.param(_path_windows_abs, 25, "C:…bar\\baz\\some file name", id="windows abs - truncated by 3"),
+        pytest.param(_path_windows_abs, 24, "C:…ar\\baz\\some file name", id="windows abs - truncated by 4"),
+        pytest.param(_path_windows_abs, 23, "C:…r\\baz\\some file name", id="windows abs - truncated by 5"),
+        pytest.param(_path_windows_abs, 22, "C:…\\baz\\some file name", id="windows abs - truncated by 6"),
+        pytest.param(_path_windows_abs, 21, "C:…baz\\some file name", id="windows abs - truncated by 7 (cuts off separator)"),
+        pytest.param(_path_windows_abs, 18, "C:…\\some file name", id="windows abs - truncated (all parts except name)"),
+        pytest.param(_path_windows_abs, 17, "C:…some file name", id="windows abs - truncated (name without separator)"),
+        pytest.param(_path_windows_abs, 16, "C:…ome file name", id="windows abs - truncated name"),
+        pytest.param(_path_windows_rel, 25, "foobar\\baz\\some file name", id="windows rel - full path"),
+        pytest.param(_path_windows_rel, 24, "…obar\\baz\\some file name", id="windows rel - truncated by 1"),
+        pytest.param(_path_windows_rel, 23, "…bar\\baz\\some file name", id="windows rel - truncated by 2"),
+        pytest.param(_path_windows_rel, 22, "…ar\\baz\\some file name", id="windows rel - truncated by 3"),
+        pytest.param(_path_windows_rel, 21, "…r\\baz\\some file name", id="windows rel - truncated by 4"),
+        pytest.param(_path_windows_rel, 20, "…\\baz\\some file name", id="windows rel - truncated by 5"),
+        pytest.param(_path_windows_rel, 19, "…baz\\some file name", id="windows rel - truncated by 6 (cuts off separator)"),
+        pytest.param(_path_windows_rel, 16, "…\\some file name", id="windows rel - truncated (all parts except name)"),
+        pytest.param(_path_windows_rel, 15, "…some file name", id="windows rel - truncated (name without separator)"),
+        pytest.param(_path_windows_rel, 14, "…ome file name", id="windows rel - truncated name"),
         pytest.param(_path_windows_unc, 29, "\\\\?\\foobar\\baz\\some file name", id="windows UNC - full path"),
         pytest.param(_path_windows_unc, 28, "\\\\?\\…obar\\baz\\some file name", id="windows UNC - truncated by 1"),
         pytest.param(_path_windows_unc, 20, "\\\\?\\…\\some file name", id="windows UNC - truncated (all parts except name)"),
@@ -140,7 +150,7 @@ class TestProgressFormatter:
 
 
 class TestWidth:
-    @pytest.mark.parametrize("chars,expected", [
+    @pytest.mark.parametrize(("chars", "expected"), [
         ("ABCDEFGHIJ", 10),
         ("A你好世界こんにちは안녕하세요B", 30),
         ("·「」『』【】-=！@#￥%……&×（）", 30),
@@ -148,7 +158,7 @@ class TestWidth:
     def test_width(self, chars, expected):
         assert ProgressFormatter.width(chars) == expected
 
-    @pytest.mark.parametrize("prefix,max_len,expected", [
+    @pytest.mark.parametrize(("prefix", "max_len", "expected"), [
         ("你好世界こんにちは안녕하세요CD", 10, "녕하세요CD"),
         ("你好世界こんにちは안녕하세요CD", 9, "하세요CD"),
         ("你好世界こんにちは안녕하세요CD", 23, "こんにちは안녕하세요CD"),
@@ -164,15 +174,15 @@ class TestPrint:
             mock_get_terminal_size.return_value = Mock(columns=10)
             yield
 
-    @pytest.fixture
+    @pytest.fixture()
     def stream(self):
         return StringIO()
 
-    @pytest.fixture
+    @pytest.fixture()
     def progress(self, stream: StringIO):
-        yield Progress(stream, Mock())
+        return Progress(stream, Mock())
 
-    @posix_only
+    @pytest.mark.posix_only()
     def test_print_posix(self, progress: Progress, stream: StringIO):
         progress.print_inplace("foo")
         progress.print_inplace("barbaz")
@@ -181,7 +191,7 @@ class TestPrint:
         progress.print_end()
         assert stream.getvalue() == "\rfoo       \rbarbaz    \r0123456789\rabcdefghijk\n"
 
-    @windows_only
+    @pytest.mark.windows_only()
     def test_print_windows(self, progress: Progress, stream: StringIO):
         progress.print_inplace("foo")
         progress.print_inplace("barbaz")
@@ -214,33 +224,33 @@ class TestProgress:
                    == call("\r[download] Written 0 bytes to ../../the/path/where/we/write/to (0s)   ")
 
             frozen_time.tick()
-            progress.put(kib * 1)
+            progress.write(kib * 1)
             progress.update()
             assert output_write.call_args_list[-1] \
                    == call("\r[download] Written 1.00 KiB to …th/where/we/write/to (1s @ 1.00 KiB/s)")
 
             frozen_time.tick()
             mock_width.return_value = 65
-            progress.put(kib * 3)
+            progress.write(kib * 3)
             progress.update()
             assert output_write.call_args_list[-1] \
                    == call("\r[download] Written 4.00 KiB to …ere/we/write/to (2s @ 2.00 KiB/s)")
 
             frozen_time.tick()
             mock_width.return_value = 60
-            progress.put(kib * 5)
+            progress.write(kib * 5)
             progress.update()
             assert output_write.call_args_list[-1] \
                    == call("\r[download] Written 9.00 KiB (3s @ 4.50 KiB/s)               ")
 
             frozen_time.tick()
-            progress.put(kib * 7)
+            progress.write(kib * 7)
             progress.update()
             assert output_write.call_args_list[-1] \
                    == call("\r[download] Written 16.00 KiB (4s @ 7.50 KiB/s)              ")
 
             frozen_time.tick()
-            progress.put(kib * 5)
+            progress.write(kib * 5)
             progress.update()
             assert output_write.call_args_list[-1] \
                    == call("\r[download] Written 21.00 KiB (5s @ 8.50 KiB/s)              ")

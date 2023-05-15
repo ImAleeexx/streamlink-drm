@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - run: python -m pip install requests
       - run: python ./script/update-user-agents.py
         env:
           WHATISMYBROWSER_API_KEY: ${{ secrets.WHATISMYBROWSER_API_KEY }}
-      - uses: peter-evans/create-pull-request@10db75894f6d53fc01c3bb0995e95bd03e583a62
+      - uses: peter-evans/create-pull-request@9e5b2344021c369f621dcb89ffde8fd910dac08c
         with:
           token: ${{ secrets.STREAMLINKBOT_USERAGENTS_PR }}
           add-paths: |

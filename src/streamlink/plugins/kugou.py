@@ -13,21 +13,22 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://fanxing\.kugou\.com/(?P<room_id>\d+)"
+    r"https?://fanxing\.kugou\.com/(?P<room_id>\d+)",
 ))
 class Kugou(Plugin):
     _roomid_re = re.compile(r"roomId:\s*'(\d+)'")
     _room_stream_list_schema = validate.Schema(
         {
             "data": validate.any(None, {
-                "httpflv": validate.url()
-            })
+                "httpflv": validate.url(),
+            }),
         },
-        validate.get("httpflv_room_stream_list_schema")
+        validate.get("httpflv_room_stream_list_schema"),
     )
 
     _stream_hv_schema = validate.Schema(validate.any(
@@ -38,14 +39,14 @@ class Kugou(Plugin):
         }],
     ))
     _stream_data_schema = validate.Schema({
-        "msg": validate.text,
+        "msg": str,
         "code": int,
         "data": {
             "status": int,
             "vertical": _stream_hv_schema,
             "horizontal": _stream_hv_schema,
             "roomId": int,
-        }
+        },
     })
 
     def _get_streams(self):
@@ -67,7 +68,7 @@ class Kugou(Plugin):
                 "kugouId": "0",
                 "roomId": room_id,
                 "_": int(time.time()),
-            }
+            },
         )
         stream_data_json = self.session.http.json(res, schema=self._stream_data_schema)
         log.trace("{0!r}".format(stream_data_json))

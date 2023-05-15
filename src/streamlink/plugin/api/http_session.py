@@ -1,11 +1,11 @@
-import ssl
+import re
 import time
-from typing import Any, Callable, Dict, List, Pattern, Tuple
+from typing import Any, Dict, Pattern, Tuple
 
 import requests.adapters
-# noinspection PyPackageRequirements
 import urllib3
 from requests import PreparedRequest, Request, Session
+from requests.adapters import HTTPAdapter
 
 from streamlink.exceptions import PluginError
 from streamlink.packages.requests_file import FileAdapter
@@ -13,9 +13,14 @@ from streamlink.plugin.api import useragents
 from streamlink.utils.parse import parse_json, parse_xml
 
 
-urllib3_version = tuple(map(int, urllib3.__version__.split(".")[:3]))
+try:
+    from urllib3.util import create_urllib3_context  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover
+    # urllib3 <2.0.0 compat import
+    from urllib3.util.ssl_ import create_urllib3_context
 
 
+# urllib3>=2.0.0: enforce_content_length now defaults to True (keep the override for backwards compatibility)
 class _HTTPResponse(urllib3.response.HTTPResponse):
     def __init__(self, *args, **kwargs):
         # Always enforce content length validation!
@@ -42,8 +47,8 @@ urllib3.connectionpool.HTTPConnectionPool.ResponseCls = _HTTPResponse  # type: i
 requests.adapters.HTTPResponse = _HTTPResponse  # type: ignore[misc]
 
 
-# Never convert percent-encoded characters to uppercase in urllib3>=1.25.4.
-# This is required for sites which compare request URLs byte for byte and return different responses depending on that.
+# Never convert percent-encoded characters to uppercase in urllib3>=1.25.8.
+# This is required for sites which compare request URLs byte by byte and return different responses depending on that.
 # Older versions of urllib3 are not compatible with this override and will always convert to uppercase characters.
 #
 # https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
@@ -53,40 +58,20 @@ requests.adapters.HTTPResponse = _HTTPResponse  # type: ignore[misc]
 # > octets, they are equivalent.  For consistency, URI producers and
 # > normalizers should use uppercase hexadecimal digits for all percent-
 # > encodings.
-if urllib3_version >= (1, 25, 4):
-    class Urllib3UtilUrlPercentReOverride:
-        _re_percent_encoding: Pattern = urllib3.util.url.PERCENT_RE  # type: ignore[attr-defined]
+class Urllib3UtilUrlPercentReOverride:
+    # urllib3>=2.0.0: _PERCENT_RE, urllib3<2.0.0: PERCENT_RE
+    _re_percent_encoding: Pattern \
+        = getattr(urllib3.util.url, "_PERCENT_RE", getattr(urllib3.util.url, "PERCENT_RE", re.compile(r"%[a-fA-F0-9]{2}")))
 
-        @classmethod
-        def _num_percent_encodings(cls, string) -> int:
-            return len(cls._re_percent_encoding.findall(string))
-
-        # urllib3>=1.25.8
-        # https://github.com/urllib3/urllib3/blame/1.25.8/src/urllib3/util/url.py#L219-L227
-        @classmethod
-        def subn(cls, repl: Callable, string: str) -> Tuple[str, int]:
-            return string, cls._num_percent_encodings(string)
-
-        # urllib3>=1.25.4,<1.25.8
-        # https://github.com/urllib3/urllib3/blame/1.25.4/src/urllib3/util/url.py#L218-L228
-        @classmethod
-        def findall(cls, string: str) -> List[Any]:
-            class _List(list):
-                def __len__(self) -> int:
-                    return cls._num_percent_encodings(string)
-
-            return _List()
-
-    urllib3.util.url.PERCENT_RE = Urllib3UtilUrlPercentReOverride  # type: ignore[attr-defined]
+    # urllib3>=1.25.8
+    # https://github.com/urllib3/urllib3/blame/1.25.8/src/urllib3/util/url.py#L219-L227
+    @classmethod
+    def subn(cls, repl: Any, string: str, count: Any = None) -> Tuple[str, int]:
+        return string, len(cls._re_percent_encoding.findall(string))
 
 
-def _parse_keyvalue_list(val):
-    for keyvalue in val.split(";"):
-        try:
-            key, value = keyvalue.split("=", 1)
-            yield key.strip(), value.strip()
-        except ValueError:
-            continue
+# urllib3>=2.0.0: _PERCENT_RE, urllib3<2.0.0: PERCENT_RE
+urllib3.util.url._PERCENT_RE = urllib3.util.url.PERCENT_RE = Urllib3UtilUrlPercentReOverride  # type: ignore[attr-defined]
 
 
 # requests.Request.__init__ keywords, except for "hooks"
@@ -99,10 +84,10 @@ class HTTPSession(Session):
     def __init__(self):
         super().__init__()
 
-        self.headers['User-Agent'] = useragents.FIREFOX
+        self.headers["User-Agent"] = useragents.FIREFOX
         self.timeout = 20.0
 
-        self.mount('file://', FileAdapter())
+        self.mount("file://", FileAdapter())
 
     @classmethod
     def determine_json_encoding(cls, sample):
@@ -138,30 +123,6 @@ class HTTPSession(Session):
     def xml(cls, res, *args, **kwargs):
         """Parses XML from a response."""
         return parse_xml(res.text, *args, **kwargs)
-
-    def parse_cookies(self, cookies, **kwargs):
-        """Parses a semi-colon delimited list of cookies.
-
-        Example: foo=bar;baz=qux
-        """
-        for name, value in _parse_keyvalue_list(cookies):
-            self.cookies.set(name, value, **kwargs)
-
-    def parse_headers(self, headers):
-        """Parses a semi-colon delimited list of headers.
-
-        Example: foo=bar;baz=qux
-        """
-        for name, value in _parse_keyvalue_list(headers):
-            self.headers[name] = value
-
-    def parse_query_params(self, cookies, **kwargs):
-        """Parses a semi-colon delimited list of query parameters.
-
-        Example: foo=bar;baz=qux
-        """
-        for name, value in _parse_keyvalue_list(cookies):
-            self.params[name] = value
 
     def resolve_url(self, url):
         """Resolves any redirects and returns the final URL."""
@@ -203,12 +164,12 @@ class HTTPSession(Session):
                 res = super().request(
                     method,
                     url,
+                    *args,
                     headers=headers,
                     params=params,
                     timeout=timeout,
                     proxies=proxies,
-                    *args,
-                    **kwargs
+                    **kwargs,
                 )
                 if raise_for_status and res.status_code not in acceptable_status:
                     res.raise_for_status()
@@ -232,12 +193,24 @@ class HTTPSession(Session):
         return res
 
 
-class TLSSecLevel1Adapter(requests.adapters.HTTPAdapter):
+class TLSNoDHAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
+        ctx = create_urllib3_context()
+        ctx.load_default_certs()
+        ciphers = ":".join(cipher.get("name") for cipher in ctx.get_ciphers())
+        ciphers += ":!DH"
+        ctx.set_ciphers(ciphers)
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+class TLSSecLevel1Adapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.load_default_certs()
         ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
         kwargs["ssl_context"] = ctx
         return super().init_poolmanager(*args, **kwargs)
 
 
-__all__ = ["HTTPSession", "TLSSecLevel1Adapter"]
+__all__ = ["HTTPSession", "TLSNoDHAdapter", "TLSSecLevel1Adapter"]

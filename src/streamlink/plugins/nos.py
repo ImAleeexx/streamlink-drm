@@ -12,6 +12,7 @@ from streamlink.plugin import Plugin, PluginError, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
@@ -35,10 +36,10 @@ class NOS(Plugin):
                         validate.get("data-ssr-name"),
                         validate.all(
                             validate.getattr("text"),
-                            validate.parse_json()
-                        )
-                    ))
-                ]
+                            validate.parse_json(),
+                        ),
+                    )),
+                ],
             ))
         except PluginError:
             log.error("Could not find any stream data")
@@ -56,7 +57,7 @@ class NOS(Plugin):
                         "stream": validate.url(),
                     }},
                     validate.get("currentLivestream"),
-                    validate.union_get("title", "stream", "is_live")
+                    validate.union_get("title", "stream", "is_live"),
                 ).validate(_data_json)
                 if not is_live:
                     log.error(self._msg_live_offline)
@@ -69,7 +70,7 @@ class NOS(Plugin):
                         "title": str,
                         "stream": validate.url(),
                     },
-                    validate.union_get("title", "stream", "streamIsLive")
+                    validate.union_get("title", "stream", "streamIsLive"),
                 ).validate(_data_json)
                 if not is_live:
                     log.error(self._msg_live_offline)
@@ -86,12 +87,12 @@ class NOS(Plugin):
                                     "name": str,
                                     "url": validate.url(),
                                 }],
-                                validate.filter(lambda p: p["name"] == "hls_unencrypted")
-                            )
-                        }
+                                validate.filter(lambda p: p["name"] == "hls_unencrypted"),
+                            ),
+                        },
                     }},
                     validate.get(_key),
-                    validate.union_get("title", ("aspect_ratios", "profiles", 0, "url"))
+                    validate.union_get("title", ("aspect_ratios", "profiles", 0, "url")),
                 ).validate(_data_json)
 
             if video_url is not None:

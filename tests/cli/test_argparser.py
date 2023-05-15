@@ -14,13 +14,8 @@ def parser():
     return build_parser()
 
 
-@pytest.fixture
-def session(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("streamlink.session.Streamlink.load_builtin_plugins", lambda _: None)
-    yield Streamlink()
-
-
-@pytest.mark.parametrize("argv,option,expected", [
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.parametrize(("argv", "option", "expected"), [
     pytest.param(
         ["--locale", "xx_XX"],
         "locale",
@@ -48,13 +43,13 @@ def session(monkeypatch: pytest.MonkeyPatch):
     pytest.param(
         ["--hls-timeout", "123"],
         "stream-timeout",
-        123,
+        123.0,
         id="Deprecated argument",
     ),
     pytest.param(
         ["--hls-timeout", "123", "--stream-timeout", "456"],
         "stream-timeout",
-        456,
+        456.0,
         id="Deprecated argument with override",
     ),
 ])

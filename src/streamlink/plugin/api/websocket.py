@@ -4,6 +4,7 @@ from threading import RLock, Thread, current_thread
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote_plus, urlparse
 
+from certifi import where as certify_where
 from websocket import ABNF, STATUS_NORMAL, WebSocketApp, enableTrace  # type: ignore[import]
 
 from streamlink.logger import TRACE, root as rootlogger
@@ -39,7 +40,7 @@ class WebsocketClient(Thread):
         suppress_origin: bool = False,
         ping_interval: Union[int, float] = 0,
         ping_timeout: Optional[Union[int, float]] = None,
-        ping_payload: str = ""
+        ping_payload: str = "",
     ):
         if rootlogger.level <= TRACE:
             enableTrace(True, log)
@@ -65,6 +66,10 @@ class WebsocketClient(Thread):
         self._reconnect = False
         self._reconnect_lock = RLock()
 
+        if not sslopt:  # pragma: no cover
+            sslopt = {}
+        sslopt.setdefault("ca_certs", certify_where())
+
         self.session = session
         self._ws_init(url, subprotocols, header, cookie)
         self._ws_rundata = dict(
@@ -76,13 +81,13 @@ class WebsocketClient(Thread):
             ping_interval=ping_interval,
             ping_timeout=ping_timeout,
             ping_payload=ping_payload,
-            **proxy_options
+            **proxy_options,
         )
 
         self._id += 1
         super().__init__(
             name=f"Thread-{self.__class__.__name__}-{self._id}",
-            daemon=True
+            daemon=True,
         )
 
     def _ws_init(self, url, subprotocols, header, cookie):
@@ -98,7 +103,7 @@ class WebsocketClient(Thread):
             on_pong=self.on_pong,
             on_message=self.on_message,
             on_cont_message=self.on_cont_message,
-            on_data=self.on_data
+            on_data=self.on_data,
         )
 
     def run(self) -> None:
@@ -115,11 +120,11 @@ class WebsocketClient(Thread):
 
     def reconnect(
         self,
-        url: str = None,
+        url: Optional[str] = None,
         subprotocols: Optional[List[str]] = None,
         header: Optional[Union[List, Dict]] = None,
         cookie: Optional[str] = None,
-        closeopts: Optional[Dict] = None
+        closeopts: Optional[Dict] = None,
     ) -> None:
         with self._reconnect_lock:
             # ws connection is not active (anymore)
@@ -132,7 +137,7 @@ class WebsocketClient(Thread):
                 url=self.ws.url if url is None else url,
                 subprotocols=self.ws.subprotocols if subprotocols is None else subprotocols,
                 header=self.ws.header if header is None else header,
-                cookie=self.ws.cookie if cookie is None else cookie
+                cookie=self.ws.cookie if cookie is None else cookie,
             )
 
     def close(self, status: int = STATUS_NORMAL, reason: Union[str, bytes] = "", timeout: int = 3) -> None:

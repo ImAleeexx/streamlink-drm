@@ -18,11 +18,12 @@ from streamlink.utils.crypto import unpad_pkcs5
 from streamlink.utils.parse import parse_json
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(\w+)\.web\.tv/?"
+    r"https?://(\w+)\.web\.tv/?",
 ))
 class WebTV(Plugin):
     _sources_re = re.compile(r'"sources": (\[.*?\]),', re.DOTALL)
@@ -31,14 +32,14 @@ class WebTV(Plugin):
             "src": validate.any(
                 validate.contains("m3u8"),
                 validate.all(
-                    validate.text,
+                    str,
                     validate.transform(lambda x: WebTV.decrypt_stream_url(x)),
-                    validate.contains("m3u8")
-                )
+                    validate.contains("m3u8"),
+                ),
             ),
-            "type": validate.text,
-            "label": validate.text
-        }
+            "type": str,
+            "label": str,
+        },
     ])
 
     @staticmethod
@@ -76,7 +77,7 @@ class WebTV(Plugin):
                             yield from variant.items()
                         else:
                             # and if that fails, try it as a plain HLS stream
-                            yield 'live', HLSStream(self.session, url, headers=headers)
+                            yield "live", HLSStream(self.session, url, headers=headers)
                     except OSError:
                         log.warning("Could not open the stream, perhaps the channel is offline")
 

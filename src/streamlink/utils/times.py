@@ -1,4 +1,27 @@
 import re
+from datetime import datetime, timezone, tzinfo
+
+from isodate import LOCAL, parse_datetime  # type: ignore[import]
+
+
+UTC = timezone.utc
+
+
+def now(tz: tzinfo = UTC) -> datetime:
+    return datetime.now(tz=tz)
+
+
+def localnow() -> datetime:
+    return datetime.now(tz=LOCAL)
+
+
+def fromtimestamp(timestamp: float, tz: tzinfo = UTC) -> datetime:
+    return datetime.fromtimestamp(timestamp, tz=tz)
+
+
+def fromlocaltimestamp(timestamp: float) -> datetime:
+    return datetime.fromtimestamp(timestamp, tz=LOCAL)
+
 
 _hours_minutes_seconds_re = re.compile(r"""
     ^-?(?:(?P<hours>\d+):)?(?P<minutes>\d+):(?P<seconds>\d+)$
@@ -54,11 +77,18 @@ def seconds_to_hhmmss(seconds):
     return "{0:02d}:{1:02d}:{2}".format(
         int(hours),
         int(minutes),
-        "{0:02.1f}".format(seconds) if seconds % 1 else "{0:02d}".format(int(seconds))
+        "{0:02.1f}".format(seconds) if seconds % 1 else "{0:02d}".format(int(seconds)),
     )
 
 
 __all__ = [
+    "UTC",
+    "LOCAL",
+    "parse_datetime",
+    "now",
+    "localnow",
+    "fromtimestamp",
+    "fromlocaltimestamp",
     "hours_minutes_seconds",
-    "seconds_to_hhmmss"
+    "seconds_to_hhmmss",
 ]

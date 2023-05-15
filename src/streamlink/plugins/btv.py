@@ -12,11 +12,12 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?btvplus\.bg/live/?"
+    r"https?://(?:www\.)?btvplus\.bg/live/?",
 ))
 class BTV(Plugin):
     URL_API = "https://btvplus.bg/lbin/v3/btvplus/player_config.php"
@@ -44,14 +45,11 @@ class BTV(Plugin):
                         validate.parse_json(),
                         {
                             "status": "ok",
-                            "config": str,
+                            "info": {
+                                "file": validate.url(path=validate.endswith(".m3u8")),
+                            },
                         },
-                        validate.get("config"),
-                        re.compile(r"src: \"(http.*?)\""),
-                        validate.none_or_all(
-                            validate.get(1),
-                            validate.url(),
-                        ),
+                        validate.get(("info", "file")),
                     ),
                 ),
             ),
@@ -63,7 +61,7 @@ class BTV(Plugin):
             log.error("The content is not available in your region")
             return
 
-        return HLSStream.parse_variant_playlist(self.session, stream_url)
+        return {"live": HLSStream(self.session, stream_url)}
 
 
 __plugin__ = BTV

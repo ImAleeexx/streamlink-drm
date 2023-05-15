@@ -13,11 +13,12 @@ from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 from streamlink.utils.url import update_scheme
 
+
 log = logging.getLogger(__name__)
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:\w+\.)*sportschau\.de/"
+    r"https?://(?:\w+\.)*sportschau\.de/",
 ))
 class Sportschau(Plugin):
     def _get_streams(self):

@@ -18,6 +18,7 @@ from streamlink.stream.dash import DASHStream
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.parse import parse_json
 
+
 log = logging.getLogger(__name__)
 
 
@@ -53,22 +54,24 @@ class BBCiPlayer(Plugin):
     bbc.co.uk/iplayer/episode/*
     """
     mediator_re = re.compile(
-        r'window\.__IPLAYER_REDUX_STATE__\s*=\s*({.*?});', re.DOTALL)
-    state_re = re.compile(r'window.__IPLAYER_REDUX_STATE__\s*=\s*({.*?});</script>')
-    account_locals_re = re.compile(r'window.bbcAccount.locals\s*=\s*({.*?});')
+        r"window\.__IPLAYER_REDUX_STATE__\s*=\s*({.*?});", re.DOTALL)
+    state_re = re.compile(r"window.__IPLAYER_REDUX_STATE__\s*=\s*({.*?});</script>")
+    account_locals_re = re.compile(r"window.bbcAccount.locals\s*=\s*({.*?});")
     hash = base64.b64decode(b"N2RmZjc2NzFkMGM2OTdmZWRiMWQ5MDVkOWExMjE3MTk5MzhiOTJiZg==")
-    api_url = "https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/" \
-              "{platform}/vpid/{vpid}/format/json/atk/{vpid_hash}/asn/1/"
+    api_url = (
+        "https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/"
+        + "{platform}/vpid/{vpid}/format/json/atk/{vpid_hash}/asn/1/"
+    )
     platforms = ("pc", "iptv-all")
     session_url = "https://session.bbc.com/session"
     auth_url = "https://account.bbc.com/signin"
 
     mediator_schema = validate.Schema(
         {
-            "versions": [{"id": validate.text}]
+            "versions": [{"id": str}],
         },
         validate.get("versions"), validate.get(0),
-        validate.get("id")
+        validate.get("id"),
     )
     mediaselector_schema = validate.Schema(
         validate.parse_json(),
@@ -76,12 +79,12 @@ class BBCiPlayer(Plugin):
             {"connection":
                 validate.all([{
                     validate.optional("href"): validate.url(),
-                    validate.optional("transferFormat"): validate.text
+                    validate.optional("transferFormat"): str,
                 }], validate.filter(lambda c: c.get("href"))),
-                "kind": validate.text}
+                "kind": str},
         ]},
         validate.get("media"),
-        validate.filter(lambda x: x["kind"] == "video")
+        validate.filter(lambda x: x["kind"] == "video"),
     )
 
     def __init__(self, *args, **kwargs):
@@ -131,9 +134,9 @@ class BBCiPlayer(Plugin):
                 for connection in media["connection"]:
                     urls[connection.get("transferFormat")].add(connection["href"])
 
-        for stream_type, urls in urls.items():
-            log.debug(f"{len(urls)} {stream_type} streams")
-            for url in list(urls):
+        for stream_type, urlitems in urls.items():
+            log.debug(f"{len(urlitems)} {stream_type} streams")
+            for url in list(urlitems):
                 try:
                     if stream_type == "hls":
                         yield from HLSStream.parse_variant_playlist(self.session, url).items()
@@ -159,7 +162,7 @@ class BBCiPlayer(Plugin):
         # make the session request to get the correct cookies
         session_res = self.session.http.get(
             self.session_url,
-            params=dict(ptrt=ptrt_url)
+            params=dict(ptrt=ptrt_url),
         )
 
         if auth_check(session_res):
@@ -172,8 +175,8 @@ class BBCiPlayer(Plugin):
             data=dict(
                 jsEnabled=True,
                 username=self.get_option("username"),
-                password=self.get_option('password'),
-                attempts=0
+                password=self.get_option("password"),
+                attempts=0,
             ),
             headers={"Referer": self.url})
 
@@ -183,11 +186,13 @@ class BBCiPlayer(Plugin):
         if not self.get_option("username"):
             log.error(
                 "BBC iPlayer requires an account you must login using "
-                "--bbciplayer-username and --bbciplayer-password")
+                + "--bbciplayer-username and --bbciplayer-password",
+            )
             return
         log.info(
             "A TV License is required to watch BBC iPlayer streams, see the BBC website for more "
-            "information: https://www.bbc.co.uk/iplayer/help/tvlicence")
+            + "information: https://www.bbc.co.uk/iplayer/help/tvlicence",
+        )
         if not self.login(self.url):
             log.error(
                 "Could not authenticate, check your username and password")

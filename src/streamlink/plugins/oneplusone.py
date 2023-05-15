@@ -7,7 +7,6 @@ $type live
 import logging
 import re
 from base64 import b64decode
-from datetime import datetime
 from time import time
 from urllib.parse import urljoin, urlparse
 
@@ -15,6 +14,8 @@ from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+from streamlink.utils.times import fromlocaltimestamp
+
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class OnePlusOneHLS(HLSStream):
         self.api = OnePlusOneAPI(session_, self_url)
 
     def _next_watch_timeout(self):
-        _next = datetime.fromtimestamp(self.watch_timeout).isoformat(" ")
+        _next = fromlocaltimestamp(self.watch_timeout).isoformat(" ")
         log.debug(f"next watch_timeout at {_next}")
 
     def open(self):
@@ -56,7 +57,7 @@ class OnePlusOneHLS(HLSStream):
 
             self._url = parsed._replace(
                 netloc=self._first_netloc,
-                path="/".join(list(path_parts))
+                path="/".join(list(path_parts)),
             ).geturl()
         return self._url
 
@@ -76,7 +77,7 @@ class OnePlusOneAPI:
             ),
         )
         if not url_parts:
-            raise NoStreamsError("Missing url_parts")
+            raise NoStreamsError
 
         log.trace(f"url_parts={url_parts}")
         self.session.http.headers.update({"Referer": self.url})
@@ -111,7 +112,7 @@ class OnePlusOneAPI:
 
 
 @pluginmatcher(re.compile(
-    r"https?://1plus1\.video/(?:\w{2}/)?tvguide/[^/]+/online"
+    r"https?://1plus1\.video/(?:\w{2}/)?tvguide/[^/]+/online",
 ))
 class OnePlusOne(Plugin):
     def _get_streams(self):

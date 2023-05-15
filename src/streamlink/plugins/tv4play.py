@@ -11,9 +11,10 @@ import logging
 import re
 from urllib.parse import urljoin
 
-from streamlink.plugin import Plugin, PluginError, pluginmatcher
+from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
+
 
 log = logging.getLogger(__name__)
 
@@ -36,10 +37,10 @@ class TV4Play(Plugin):
     _meta_schema = validate.Schema(
         {
             "metadata": {
-                "title": validate.text
+                "title": str,
             },
-            "mediaUri": validate.text
-        }
+            "mediaUri": str,
+        },
     )
 
     @property
@@ -58,11 +59,12 @@ class TV4Play(Plugin):
         try:
             res = self.session.http.get(
                 self.api_assets.format(self.get_video_id),
-                params=params
+                params=params,
             )
         except Exception as e:
             if "404 Client Error" in str(e):
-                raise PluginError("This Video is not available")
+                log.error("This Video is not available")
+                return
             raise e
         log.debug("Found metadata")
         metadata = self.session.http.json(res, schema=self._meta_schema)
@@ -81,7 +83,8 @@ class TV4Play(Plugin):
             res = self.session.http.get(urljoin(self.api_url, metadata["mediaUri"]))
         except Exception as e:
             if "401 Client Error" in str(e):
-                raise PluginError("This Video is not available in your country")
+                log.error("This Video is not available in your country")
+                return
             raise e
 
         log.debug("Found stream data")

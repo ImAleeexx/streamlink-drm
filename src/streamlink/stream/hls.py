@@ -2,24 +2,29 @@ import logging
 import re
 import struct
 from concurrent.futures import Future
-from threading import Event
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 # noinspection PyPackageRequirements
 from Crypto.Cipher import AES
+
 # noinspection PyPackageRequirements
 from Crypto.Util.Padding import unpad
 from requests import Response
-from requests.exceptions import ChunkedEncodingError, ConnectionError, ContentDecodingError
+from requests.exceptions import ChunkedEncodingError, ConnectionError, ContentDecodingError, InvalidSchema
 
+from streamlink.buffers import RingBuffer
 from streamlink.exceptions import StreamError
 from streamlink.stream.ffmpegmux import FFMPEGMuxer, MuxedStream
-from streamlink.stream.hls_playlist import ByteRange, Key, M3U8, Map, Media, Segment, load as load_hls_playlist
+from streamlink.stream.filtered import FilteredStream
+from streamlink.stream.hls_playlist import M3U8, ByteRange, Key, Map, Media, Segment, load as load_hls_playlist
 from streamlink.stream.http import HTTPStream
 from streamlink.stream.segmented import SegmentedStreamReader, SegmentedStreamWorker, SegmentedStreamWriter
 from streamlink.utils.cache import LRUCache
 from streamlink.utils.formatter import Formatter
+from streamlink.utils.times import now
+
 
 log = logging.getLogger(__name__)
 
@@ -63,18 +68,21 @@ class ByteRangeOffset:
 class HLSStreamWriter(SegmentedStreamWriter):
     WRITE_CHUNK_SIZE = 8192
 
-    def __init__(self, *args, **kwargs):
+    reader: "HLSStreamReader"
+    stream: "HLSStream"
+
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         options = self.session.options
 
         self.byterange: ByteRangeOffset = ByteRangeOffset()
         self.map_cache: LRUCache[str, Future] = LRUCache(self.threads)
-        self.key_data = None
-        self.key_uri = None
+        self.key_data: Union[bytes, bytearray, memoryview] = b""
+        self.key_uri: Optional[str] = None
         self.key_uri_override = options.get("hls-segment-key-uri")
         self.stream_data = options.get("hls-segment-stream-data")
 
-        self.ignore_names = False
+        self.ignore_names: Optional[re.Pattern] = None
         ignore_names = {*options.get("hls-segment-ignore-names")}
         if ignore_names:
             segments = "|".join(map(re.escape, ignore_names))
@@ -106,12 +114,20 @@ class HLSStreamWriter(SegmentedStreamWriter):
             key_uri = formatter.format(self.key_uri_override)
 
         if key_uri and self.key_uri != key_uri:
-            res = self.session.http.get(
-                key_uri,
-                exception=StreamError,
-                retries=self.retries,
-                **self.reader.request_params
-            )
+            try:
+                res = self.session.http.get(
+                    key_uri,
+                    exception=StreamError,
+                    retries=self.retries,
+                    **self.reader.request_params,
+                )
+            except StreamError as err:
+                # FIXME: fix HTTPSession.request()
+                original_error = getattr(err, "err", None)
+                if isinstance(original_error, InvalidSchema):
+                    raise StreamError(f"Unable to find connection adapter for key URI: {key_uri}") from original_error
+                raise  # pragma: no cover
+
             res.encoding = "binary/octet-stream"
             self.key_data = res.content
             self.key_uri = key_uri
@@ -196,27 +212,41 @@ class HLSStreamWriter(SegmentedStreamWriter):
         )
 
     def should_filter_sequence(self, sequence: Sequence) -> bool:
-        return self.ignore_names and self.ignore_names.search(sequence.segment.uri) is not None
+        return self.ignore_names is not None and self.ignore_names.search(sequence.segment.uri) is not None
 
     def write(self, sequence: Sequence, result: Response, *data):
         if not self.should_filter_sequence(sequence):
+            log.debug(f"Writing segment {sequence.num} to output")
+
+            written_once = self.reader.buffer.written_once
             try:
                 return self._write(sequence, result, *data)
             finally:
+                is_paused = self.reader.is_paused()
+
+                # Depending on the filtering implementation, the segment's discontinuity attribute can be missing.
+                # Also check if the output will be resumed after data has already been written to the buffer before.
+                if sequence.segment.discontinuity or is_paused and written_once:
+                    log.warning(
+                        "Encountered a stream discontinuity. This is unsupported and will result in incoherent output data.",
+                    )
+
                 # unblock reader thread after writing data to the buffer
-                if not self.reader.filter_event.is_set():
+                if is_paused:
                     log.info("Resuming stream output")
-                    self.reader.filter_event.set()
+                    self.reader.resume()
 
         else:
+            log.debug(f"Discarding segment {sequence.num}")
+
             # Read and discard any remaining HTTP response data in the response connection.
             # Unread data in the HTTPResponse connection blocks the connection from being released back to the pool.
             result.raw.drain_conn()
 
             # block reader thread if filtering out segments
-            if self.reader.filter_event.is_set():
+            if not self.reader.is_paused():
                 log.info("Filtering out segments and pausing stream output")
-                self.reader.filter_event.clear()
+                self.reader.pause()
 
     def _write(self, sequence: Sequence, result: Response, is_map: bool):
         if sequence.segment.key and sequence.segment.key.method != "NONE":
@@ -258,14 +288,18 @@ class HLSStreamWriter(SegmentedStreamWriter):
 
 
 class HLSStreamWorker(SegmentedStreamWorker):
-    def __init__(self, *args, **kwargs):
+    reader: "HLSStreamReader"
+    writer: "HLSStreamWriter"
+    stream: "HLSStream"
+
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.stream = self.reader.stream
 
         self.playlist_changed = False
         self.playlist_end: Optional[int] = None
         self.playlist_sequence: int = -1
         self.playlist_sequences: List[Sequence] = []
+        self.playlist_reload_last: datetime = now()
         self.playlist_reload_time: float = 6
         self.playlist_reload_time_override = self.session.options.get("hls-playlist-reload-time")
         self.playlist_reload_retries = self.session.options.get("hls-playlist-reload-attempts")
@@ -307,7 +341,7 @@ class HLSStreamWorker(SegmentedStreamWorker):
         try:
             playlist = self._reload_playlist(res)
         except ValueError as err:
-            raise StreamError(err)
+            raise StreamError(err) from err
 
         if playlist.is_master:
             raise StreamError(f"Attempted to play a variant playlist, use 'hls://{self.stream.url}' instead")
@@ -381,10 +415,11 @@ class HLSStreamWorker(SegmentedStreamWorker):
         return default
 
     def iter_segments(self):
+        self.playlist_reload_last = now()
         try:
             self.reload_playlist()
         except StreamError as err:
-            log.error(f'{err}')
+            log.error(f"{err}")
             self.reader.close()
             return
 
@@ -398,12 +433,16 @@ class HLSStreamWorker(SegmentedStreamWorker):
             self.playlist_sequence = self.duration_to_sequence(self.duration_offset_start, self.playlist_sequences)
 
         if self.playlist_sequences:
-            log.debug(f"First Sequence: {self.playlist_sequences[0].num}; "
-                      f"Last Sequence: {self.playlist_sequences[-1].num}")
-            log.debug(f"Start offset: {self.duration_offset_start}; "
-                      f"Duration: {self.duration_limit}; "
-                      f"Start Sequence: {self.playlist_sequence}; "
-                      f"End Sequence: {self.playlist_end}")
+            log.debug("; ".join([
+                f"First Sequence: {self.playlist_sequences[0].num}",
+                f"Last Sequence: {self.playlist_sequences[-1].num}",
+            ]))
+            log.debug("; ".join([
+                f"Start offset: {self.duration_offset_start}",
+                f"Duration: {self.duration_limit}",
+                f"Start Sequence: {self.playlist_sequence}",
+                f"End Sequence: {self.playlist_end}",
+            ]))
 
         total_duration = 0
         while not self.closed:
@@ -416,24 +455,42 @@ class HLSStreamWorker(SegmentedStreamWorker):
                     return
 
                 # End of stream
-                stream_end = self.playlist_end and sequence.num >= self.playlist_end
+                stream_end = self.playlist_end is not None and sequence.num >= self.playlist_end
                 if self.closed or stream_end:
                     return
 
                 self.playlist_sequence = sequence.num + 1
 
-            if self.wait(self.playlist_reload_time):
+            # Exclude playlist fetch+processing time from the overall playlist reload time
+            # and reload playlist in a strict time interval
+            time_completed = now()
+            time_elapsed = max(0.0, (time_completed - self.playlist_reload_last).total_seconds())
+            time_wait = max(0.0, self.playlist_reload_time - time_elapsed)
+            if self.wait(time_wait):
+                if time_wait > 0:
+                    # If we had to wait, then don't call now() twice and instead reference the timestamp from before
+                    # the wait() call, to prevent a shifting time offset due to the execution time.
+                    self.playlist_reload_last = time_completed + timedelta(seconds=time_wait)
+                else:
+                    # Otherwise, get the current time, as the reload interval already has shifted.
+                    self.playlist_reload_last = now()
+
                 try:
                     self.reload_playlist()
                 except StreamError as err:
                     log.warning(f"Failed to reload playlist: {err}")
 
 
-class HLSStreamReader(SegmentedStreamReader):
+class HLSStreamReader(FilteredStream, SegmentedStreamReader):
     __worker__ = HLSStreamWorker
     __writer__ = HLSStreamWriter
 
-    def __init__(self, stream):
+    worker: "HLSStreamWorker"
+    writer: "HLSStreamWriter"
+    stream: "HLSStream"
+    buffer: RingBuffer
+
+    def __init__(self, stream: "HLSStream"):
         self.request_params = dict(stream.args)
         # These params are reserved for internal use
         self.request_params.pop("exception", None)
@@ -441,32 +498,10 @@ class HLSStreamReader(SegmentedStreamReader):
         self.request_params.pop("timeout", None)
         self.request_params.pop("url", None)
 
-        self.filter_event = Event()
-        self.filter_event.set()
-
         super().__init__(stream)
 
-    def read(self, size):
-        while True:
-            try:
-                return super().read(size)
-            except OSError:
-                # wait indefinitely until filtering ends
-                self.filter_event.wait()
-                if self.buffer.closed:
-                    return b""
-                # if data is available, try reading again
-                if self.buffer.length > 0:
-                    continue
-                # raise if not filtering and no data available
-                raise
 
-    def close(self):
-        super().close()
-        self.filter_event.set()
-
-
-class MuxedHLSStream(MuxedStream):
+class MuxedHLSStream(MuxedStream["HLSStream"]):
     """
     Muxes multiple HLS video and audio streams into one output stream.
     """
@@ -482,7 +517,7 @@ class MuxedHLSStream(MuxedStream):
         multivariant: Optional[M3U8] = None,
         force_restart: bool = False,
         ffmpeg_options: Optional[Dict[str, Any]] = None,
-        **args
+        **args,
     ):
         """
         :param streamlink.Streamlink session: Streamlink session instance
@@ -503,7 +538,7 @@ class MuxedHLSStream(MuxedStream):
             else:
                 tracks.append(audio)
         maps.extend(f"{i}:a" for i in range(1, len(tracks)))
-        substreams = map(lambda url: HLSStream(session, url, force_restart=force_restart, **args), tracks)
+        substreams = [HLSStream(session, url, force_restart=force_restart, **args) for url in tracks]
         ffmpeg_options = ffmpeg_options or {}
 
         super().__init__(session, *substreams, format="mpegts", maps=maps, **ffmpeg_options)
@@ -541,7 +576,7 @@ class HLSStream(HTTPStream):
         force_restart: bool = False,
         start_offset: float = 0,
         duration: Optional[float] = None,
-        **args
+        **args,
     ):
         """
         :param streamlink.Streamlink session_: Streamlink session instance
@@ -620,7 +655,7 @@ class HLSStream(HTTPStream):
         name_fmt: Optional[str] = None,
         start_offset: float = 0,
         duration: Optional[float] = None,
-        **request_params
+        **request_params,
     ) -> Dict[str, Union["HLSStream", "MuxedHLSStream"]]:
         """
         Parse a variant playlist and return its streams.
@@ -639,14 +674,14 @@ class HLSStream(HTTPStream):
         """
 
         locale = session_.localization
-        audio_select = session_.options.get("hls-audio-select") or []
+        audio_select = session_.options.get("hls-audio-select")
 
         res = cls._fetch_variant_playlist(session_, url, **request_params)
 
         try:
             multivariant = cls._get_variant_playlist(res)
         except ValueError as err:
-            raise OSError(f"Failed to parse playlist: {err}")
+            raise OSError(f"Failed to parse playlist: {err}") from err
 
         stream_name: Optional[str]
         stream: Union["HLSStream", "MuxedHLSStream"]
@@ -759,7 +794,7 @@ class HLSStream(HTTPStream):
                     force_restart=force_restart,
                     start_offset=start_offset,
                     duration=duration,
-                    **request_params
+                    **request_params,
                 )
             else:
                 stream = cls(
@@ -769,7 +804,7 @@ class HLSStream(HTTPStream):
                     force_restart=force_restart,
                     start_offset=start_offset,
                     duration=duration,
-                    **request_params
+                    **request_params,
                 )
 
             streams[stream_name] = stream

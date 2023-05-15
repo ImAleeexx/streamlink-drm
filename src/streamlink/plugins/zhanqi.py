@@ -12,6 +12,7 @@ from streamlink.plugin.api import validate
 from streamlink.stream.hls import HLSStream
 from streamlink.stream.http import HTTPStream
 
+
 log = logging.getLogger(__name__)
 
 API_URL = "https://www.zhanqi.tv/api/static/v2.1/room/domain/{0}.json"
@@ -23,18 +24,18 @@ _room_schema = validate.Schema(
     {
         "data": validate.any(None, {
             "status": validate.all(
-                validate.text,
-                validate.transform(int)
+                str,
+                validate.transform(int),
             ),
-            "videoId": validate.text
-        })
+            "videoId": str,
+        }),
     },
-    validate.get("data")
+    validate.get("data"),
 )
 
 
 @pluginmatcher(re.compile(
-    r"https?://(www\.)?zhanqi\.tv/(?P<channel>[^/]+)"
+    r"https?://(www\.)?zhanqi\.tv/(?P<channel>[^/]+)",
 ))
 class Zhanqitv(Plugin):
     def _get_streams(self):

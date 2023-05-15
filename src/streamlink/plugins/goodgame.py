@@ -11,6 +11,7 @@ from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.stream.hls import HLSStream
 from streamlink.utils.parse import parse_json
 
+
 log = logging.getLogger(__name__)
 
 HLS_URL_FORMAT = "https://hls.goodgame.ru/hls/{0}{1}.m3u8"
@@ -18,15 +19,15 @@ QUALITIES = {
     "1080p": "",
     "720p": "_720",
     "480p": "_480",
-    "240p": "_240"
+    "240p": "_240",
 }
 
-_apidata_re = re.compile(r'''(?P<quote>["']?)channel(?P=quote)\s*:\s*(?P<data>{.*?})\s*,''')
+_apidata_re = re.compile(r"""(?P<quote>["']?)channel(?P=quote)\s*:\s*(?P<data>{.*?})\s*,""")
 _ddos_re = re.compile(r'document.cookie="(__DDOS_[^;]+)')
 
 
 @pluginmatcher(re.compile(
-    r"https?://(?:www\.)?goodgame\.ru/channel/(?P<user>[^/]+)"
+    r"https?://(?:www\.)?goodgame\.ru/channel/(?P<user>[^/]+)",
 ))
 class GoodGame(Plugin):
     def _check_stream(self, url):
@@ -36,7 +37,7 @@ class GoodGame(Plugin):
 
     def _get_streams(self):
         headers = {
-            "Referer": self.url
+            "Referer": self.url,
         }
         res = self.session.http.get(self.url, headers=headers)
 
@@ -53,12 +54,12 @@ class GoodGame(Plugin):
             return
 
         log.debug("Found channel info: id={id} channelkey={channelkey} pid={streamkey} online={status}".format(**channel_info))
-        if not channel_info['status']:
+        if not channel_info["status"]:
             log.debug("Channel appears to be offline")
 
         streams = {}
         for name, url_suffix in QUALITIES.items():
-            url = HLS_URL_FORMAT.format(channel_info['streamkey'], url_suffix)
+            url = HLS_URL_FORMAT.format(channel_info["streamkey"], url_suffix)
             if not self._check_stream(url):
                 continue
 

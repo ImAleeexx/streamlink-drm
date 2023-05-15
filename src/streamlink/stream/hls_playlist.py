@@ -2,16 +2,18 @@ import inspect
 import logging
 import math
 import re
-from binascii import unhexlify
+from binascii import Error as BinasciiError, unhexlify
 from datetime import datetime, timedelta
-from itertools import starmap
 from typing import Any, Callable, ClassVar, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tuple, Type, Union
 from urllib.parse import urljoin, urlparse
 
 from isodate import ISO8601Error, parse_datetime  # type: ignore[import]
 from requests import Response
 
-log = logging.getLogger(__name__)
+from streamlink.logger import ALL, StreamlinkLogger
+
+
+log: StreamlinkLogger = logging.getLogger(__name__)  # type: ignore[assignment]
 
 
 class Resolution(NamedTuple):
@@ -156,7 +158,26 @@ class M3U8Parser:
     _TAGS: ClassVar[Mapping[str, Callable[["M3U8Parser", str], None]]]
 
     _extinf_re = re.compile(r"(?P<duration>\d+(\.\d+)?)(,(?P<title>.+))?")
-    _attr_re = re.compile(r"([A-Z\-]+)=(\d+\.\d+|0x[0-9A-z]+|\d+x\d+|\d+|\"(.+?)\"|[0-9A-z\-]+)")
+    _attr_re = re.compile(r"""
+        (?P<key>[A-Z0-9\-]+)
+        =
+        (?P<value>
+            (?# decimal-integer)
+            \d+
+            (?# hexadecimal-sequence)
+            |0[xX][0-9A-Fa-f]+
+            (?# decimal-floating-point and signed-decimal-floating-point)
+            |-?\d+\.\d+
+            (?# quoted-string)
+            |\"(?P<quoted>[^\r\n\"]*)\"
+            (?# enumerated-string)
+            |[^\",\s]+
+            (?# decimal-resolution)
+            |\d+x\d+
+        )
+        (?# be more lenient and allow spaces around attributes)
+        \s*(?:,\s*|$)
+    """, re.VERBOSE)
     _range_re = re.compile(r"(?P<range>\d+)(?:@(?P<offset>\d+))?")
     _tag_re = re.compile(r"#(?P<tag>[\w-]+)(:(?P<value>.+))?")
     _res_re = re.compile(r"(\d+)x(\d+)")
@@ -172,25 +193,26 @@ class M3U8Parser:
         if "_TAGS" in self.__class__.__dict__:
             return
         tags = {}
-        setattr(self.__class__, "_TAGS", tags)
+        self.__class__._TAGS = tags
         for name, method in inspect.getmembers(self.__class__, inspect.isfunction):
             if not name.startswith("parse_tag_"):
                 continue
             tag = name[10:].upper().replace("_", "-")
             tags[tag] = method
 
-    def create_stream_info(self, streaminf: Dict[str, Optional[str]], cls=None):
+    @classmethod
+    def create_stream_info(cls, streaminf: Dict[str, Optional[str]], streaminfoclass=None):
         program_id = streaminf.get("PROGRAM-ID")
 
         _bandwidth = streaminf.get("BANDWIDTH")
         bandwidth = 0 if not _bandwidth else round(int(_bandwidth), 1 - int(math.log10(int(_bandwidth))))
 
         _resolution = streaminf.get("RESOLUTION")
-        resolution = None if not _resolution else self.parse_resolution(_resolution)
+        resolution = None if not _resolution else cls.parse_resolution(_resolution)
 
         codecs = (streaminf.get("CODECS") or "").split(",")
 
-        if cls == IFrameStreamInfo:
+        if streaminfoclass is IFrameStreamInfo:
             return IFrameStreamInfo(
                 bandwidth=bandwidth,
                 program_id=program_id,
@@ -209,27 +231,38 @@ class M3U8Parser:
                 subtitles=streaminf.get("SUBTITLES"),
             )
 
-    def split_tag(self, line: str) -> Union[Tuple[str, str], Tuple[None, None]]:
-        match = self._tag_re.match(line)
+    @classmethod
+    def split_tag(cls, line: str) -> Union[Tuple[str, str], Tuple[None, None]]:
+        match = cls._tag_re.match(line)
 
         if match:
             return match.group("tag"), (match.group("value") or "").strip()
 
         return None, None
 
-    @staticmethod
-    def map_attribute(key: str, value: str, quoted: str) -> Tuple[str, str]:
-        return key, quoted or value
+    @classmethod
+    def parse_attributes(cls, value: str) -> Dict[str, str]:
+        pos = 0
+        length = len(value)
+        res: Dict[str, str] = {}
+        while pos < length:
+            match = cls._attr_re.match(value, pos)
+            if match is None:
+                log.warning("Discarded invalid attributes list")
+                res.clear()
+                break
+            pos = match.end()
+            res[match["key"]] = match["quoted"] if match["quoted"] is not None else match["value"]
 
-    def parse_attributes(self, value: str) -> Dict[str, str]:
-        return dict(starmap(self.map_attribute, self._attr_re.findall(value)))
+        return res
 
     @staticmethod
     def parse_bool(value: str) -> bool:
         return value == "YES"
 
-    def parse_byterange(self, value: str) -> Optional[ByteRange]:
-        match = self._range_re.match(value)
+    @classmethod
+    def parse_byterange(cls, value: str) -> Optional[ByteRange]:
+        match = cls._range_re.match(value)
         if match is None:
             return None
 
@@ -239,8 +272,9 @@ class M3U8Parser:
             offset=int(offset) if offset is not None else None,
         )
 
-    def parse_extinf(self, value: str) -> ExtInf:
-        match = self._extinf_re.match(value)
+    @classmethod
+    def parse_extinf(cls, value: str) -> ExtInf:
+        match = cls._extinf_re.match(value)
         if match is None:
             return ExtInf(0, None)
 
@@ -252,27 +286,32 @@ class M3U8Parser:
     @staticmethod
     def parse_hex(value: Optional[str]) -> Optional[bytes]:
         if value is None:
-            return value
+            return None
 
-        value = value[2:]
-        if len(value) % 2:
-            value = f"0{value}"
+        if value[:2] in ("0x", "0X"):
+            try:
+                return unhexlify(f"{'0' * (len(value) % 2)}{value[2:]}")
+            except BinasciiError:
+                pass
 
-        return unhexlify(value)
+        log.warning("Discarded invalid hexadecimal-sequence attribute value")
+        return None
 
     @staticmethod
     def parse_iso8601(value: Optional[str]) -> Optional[datetime]:
         try:
             return None if value is None else parse_datetime(value)
         except (ISO8601Error, ValueError):
+            log.warning("Discarded invalid ISO8601 attribute value")
             return None
 
     @staticmethod
     def parse_timedelta(value: Optional[str]) -> Optional[timedelta]:
         return None if value is None else timedelta(seconds=float(value))
 
-    def parse_resolution(self, value: str) -> Resolution:
-        match = self._res_re.match(value)
+    @classmethod
+    def parse_resolution(cls, value: str) -> Resolution:
+        match = cls._res_re.match(value)
         if match is None:
             return Resolution(width=0, height=0)
 
@@ -482,14 +521,12 @@ class M3U8Parser:
         EXT-X-SESSION-DATA
         https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.4.4
         """
-        pass
 
     def parse_tag_ext_x_session_key(self, value: str) -> None:
         """
         EXT-X-SESSION-KEY
         https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.4.5
         """
-        pass
 
     # 4.3.5: Media or Master Playlist Tags
 
@@ -498,7 +535,6 @@ class M3U8Parser:
         EXT-X-INDEPENDENT-SEGMENTS
         https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.5.1
         """
-        pass
 
     def parse_tag_ext_x_start(self, value: str) -> None:
         """
@@ -547,6 +583,8 @@ class M3U8Parser:
             if not line.startswith("#EXTM3U"):
                 log.warning(f"Malformed HLS Playlist. Expected #EXTM3U, but got {line[:250]}")
                 raise ValueError("Missing #EXTM3U header")
+
+        lines = log.iter(ALL, lines)
 
         parse_line = self.parse_line
         for line in lines:
