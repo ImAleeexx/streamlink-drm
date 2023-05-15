@@ -194,6 +194,8 @@ class StreamlinkOptions(Options):
         "dash-timeout": _factory_set_deprecated("stream-timeout", float),
         "hls-timeout": _factory_set_deprecated("stream-timeout", float),
         "http-stream-timeout": _factory_set_deprecated("stream-timeout", float),
+        "decryption_key": _factory_set_deprecated("decryption_key", string),
+        "decryption_key_2": _factory_set_deprecated("decryption_key_2", string),
     }
 
 

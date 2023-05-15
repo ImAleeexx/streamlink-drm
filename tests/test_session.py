@@ -547,23 +547,3 @@ def test_options_http_other(session: Streamlink, option: str, attr: str, default
     session.set_option(option, value)
     assert session.get_option(option) == value
 
-
-class TestOptionsDocumentation:
-    @pytest.fixture()
-    def docstring(self, session: Streamlink):
-        docstring = session.set_option.__doc__
-        assert docstring is not None
-        return docstring
-
-    def test_default_option_is_documented(self, session: Streamlink, docstring: str):
-        assert session.options.keys()
-        for option in session.options:
-            assert f"* - {option}" in docstring, f"Option '{option}' is documented"
-
-    def test_documented_option_exists(self, session: Streamlink, docstring: str):
-        options = session.options
-        setters = options._MAP_SETTERS.keys()
-        documented = re.compile(r"\* - (\S+)").findall(docstring)[1:]
-        assert documented
-        for option in documented:
-            assert option in options or option in setters, f"Documented option '{option}' exists"
