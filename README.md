@@ -20,12 +20,15 @@ services when they are available for the content you consume and enjoy.
 
 # [Installation][streamlink-installation]
 
-Please refer to our documentation for different ways to install Streamlink:
+Requirements: 
+- Python 3
+- pip3
 
-- [Windows][streamlink-installation-windows]
-- [macOS][streamlink-installation-macos]
-- [Linux and BSD][streamlink-installation-linux-and-bsd]
-- [PyPI package and source code][streamlink-installation-pypi-source]
+Using pip3, use the following command to install streamlink for the current user
+```
+pip3 install --user -U git+https://github.com/ImAleeexx/streamlink-drm
+```
+
 
 # Features
 
