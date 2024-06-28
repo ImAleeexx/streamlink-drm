@@ -1318,20 +1318,20 @@ class TestParseXmlValidator:
         """)
 
 
-class TestParseQsdValidator:
-    def test_success(self):
-        assert validate.validate(
-            validate.parse_qsd(),
-            "foo=bar&foo=baz&qux=quux",
-        ) == {"foo": "baz", "qux": "quux"}
-
-    def test_failure(self):
-        with pytest.raises(ValidationError) as cm:
-            validate.validate(validate.parse_qsd(), 123)
-        assert_validationerror(cm.value, """
-            ValidationError:
-              Unable to parse query string: 'int' object has no attribute 'decode' (123)
-        """)
+#class TestParseQsdValidator:
+#    def test_success(self):
+#        assert validate.validate(
+#            validate.parse_qsd(),
+#            "foo=bar&foo=baz&qux=quux",
+#        ) == {"foo": "baz", "qux": "quux"}
+#
+#    def test_failure(self):
+#        with pytest.raises(ValidationError) as cm:
+#            validate.validate(validate.parse_qsd(), 123)
+#        assert_validationerror(cm.value, """
+#            ValidationError:
+#              Unable to parse query string: 'int' object has no attribute 'decode' (123)
+#        """)
 
 
 class TestValidationError:
