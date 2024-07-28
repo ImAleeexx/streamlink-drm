@@ -126,7 +126,7 @@ class DASHStreamWorker(SegmentedStreamWorker):
                     return
 
                 if not self.reload():
-                    back_off_factor = max(back_off_factor * 1.3, 10.0)
+                    back_off_factor = min(back_off_factor * 1.3, 10.0)
                 else:
                     back_off_factor = 1
 
